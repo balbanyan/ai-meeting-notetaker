@@ -27,14 +27,48 @@ class WebexMeetingBot {
     try {
       logger.info('Initializing Webex Meeting Bot...');
       
-      // Initialize Webex authentication
-      this.webex = await this.webexAuth.initialize();
-      this.attendeesAPI = new WebexAttendeesAPI(this.webex);
+      // Step 1: Validate configuration
+      logger.info('Validating configuration...');
+      const { validateConfig } = require('../utils/config');
+      validateConfig();
+      logger.info('✅ Configuration validation passed');
       
-      logger.info('Webex Meeting Bot initialized successfully');
+      // Step 2: Initialize Webex authentication
+      logger.info('Initializing Webex authentication...');
+      this.webex = await this.webexAuth.initialize();
+      
+      if (!this.webex) {
+        throw new Error('Webex SDK initialization returned null');
+      }
+      
+      logger.info('✅ Webex SDK authenticated successfully');
+      
+      // Step 3: Initialize attendees API
+      logger.info('Initializing attendees API...');
+      this.attendeesAPI = new WebexAttendeesAPI(this.webex);
+      logger.info('✅ Attendees API initialized');
+      
+      // Step 4: Test basic SDK functionality
+      logger.info('Testing Webex SDK functionality...');
+      try {
+        // Test if we can access meetings namespace
+        if (!this.webex.meetings) {
+          throw new Error('Webex meetings namespace not available');
+        }
+        logger.info('✅ Webex meetings namespace available');
+      } catch (testError) {
+        logger.warn(`SDK test warning: ${testError.message}`);
+      }
+      
+      logger.info('🎉 Webex Meeting Bot initialized successfully');
       
     } catch (error) {
-      logger.error('Failed to initialize Webex Meeting Bot:', error);
+      logger.error('❌ Failed to initialize Webex Meeting Bot:', error);
+      
+      // Cleanup on error
+      this.webex = null;
+      this.attendeesAPI = null;
+      
       throw error;
     }
   }

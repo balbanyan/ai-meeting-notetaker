@@ -18,65 +18,70 @@ class WebexAuth {
     try {
       logger.info('Initializing Webex SDK...');
       
-      // Initialize Webex SDK
+      // Step 1: Initialize Webex SDK
+      logger.info('Creating Webex SDK instance...');
       this.webex = initWebex();
       
-      // Generate JWT and authenticate
+      if (!this.webex) {
+        throw new Error('Failed to create Webex SDK instance');
+      }
+      
+      logger.info('Webex SDK instance created successfully');
+      
+      // Step 2: Generate JWT and authenticate
+      logger.info('Starting authentication process...');
       await this.authenticate();
       
-      logger.info('Webex SDK initialized and authenticated successfully');
+      // Step 3: Verify authentication worked
+      logger.info('Verifying authentication...');
+      if (!this.isAuthenticated || !this.webex) {
+        throw new Error('Authentication verification failed');
+      }
+      
+      logger.info('✅ Webex SDK initialized and authenticated successfully');
       return this.webex;
       
     } catch (error) {
-      logger.error('Failed to initialize Webex SDK:', error);
+      this.isAuthenticated = false;
+      this.webex = null;
+      logger.error('❌ Failed to initialize Webex SDK:', error);
+      
+      // Provide more specific error information
+      if (error.message.includes('JWT')) {
+        logger.error('💡 JWT generation or validation failed - check Guest Issuer credentials');
+      } else if (error.message.includes('network') || error.message.includes('ENOTFOUND')) {
+        logger.error('💡 Network error - check internet connection and DNS resolution');
+      } else if (error.message.includes('authorization') || error.message.includes('access')) {
+        logger.error('💡 Authorization failed - verify Guest Issuer ID and Secret are correct');
+      }
+      
       throw error;
     }
   }
 
   /**
-   * Authenticate using JWT or Access Token
+   * Authenticate using Guest Issuer JWT
    */
   async authenticate() {
     try {
       const { config } = require('../utils/config');
-      logger.info('Authenticating with Webex...');
+      logger.info('Authenticating with Webex using Guest Issuer...');
       
-      // Check if we have Guest Issuer credentials or Access Token
-      const hasGuestIssuer = config.webex.guestIssuerId && 
-                             config.webex.guestIssuerSecret &&
-                             config.webex.guestIssuerId !== 'your-guest-issuer-id-here';
+      // Build JWT token
+      this.currentJwt = buildJwt();
+      logger.debug('JWT built successfully');
       
-      const hasAccessToken = config.webex.accessToken && 
-                             config.webex.accessToken !== 'your-personal-access-token-here';
-      
-      if (hasGuestIssuer) {
-        // Use Guest Issuer JWT authentication
-        logger.info('Using Guest Issuer JWT authentication');
-        this.currentJwt = buildJwt();
-        
-        await this.webex.authorization.requestAccessTokenFromJwt({
-          jwt: this.currentJwt,
-        });
-        
-      } else if (hasAccessToken) {
-        // Use personal access token authentication
-        logger.info('Using personal access token authentication');
-        
-        // Set the access token directly
-        this.webex.credentials.set({
-          access_token: config.webex.accessToken
-        });
-        
-      } else {
-        throw new Error('No valid authentication method available');
-      }
+      // Authenticate with Webex using JWT
+      await this.webex.authorization.requestAccessTokenFromJwt({
+        jwt: this.currentJwt,
+      });
       
       this.isAuthenticated = true;
-      logger.info('Webex authentication successful');
+      logger.info('Webex Guest Issuer authentication successful');
       
     } catch (error) {
       this.isAuthenticated = false;
-      logger.error('Webex authentication failed:', error);
+      logger.error('Webex Guest Issuer authentication failed:', error);
       throw error;
     }
   }

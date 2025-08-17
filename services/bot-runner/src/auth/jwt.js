@@ -11,11 +11,11 @@ const logger = createLogger('JWT');
 function buildJwt() {
   try {
     const payload = {
-      sub: "webex-bot-1",
-      name: config.bot.name,
+      sub: config.bot.email || "ai-notetaker@yourcompany.com",
+      name: config.bot.displayName || config.bot.name,
       iss: config.webex.guestIssuerId,
       // 1h expiry time
-      exp: (Math.floor(new Date().getTime() / 1000) + 60 * 60).toString(),
+      exp: Math.floor(new Date().getTime() / 1000) + 60 * 60,
     };
 
     logger.debug('Building JWT with payload:', payload);

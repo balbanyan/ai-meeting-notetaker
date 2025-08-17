@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Notetaker Bot Runner</title>
+    <!-- Load Webex SDK from CDN as per official documentation -->
+    <script src="https://unpkg.com/webex@^3/umd/webex.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -84,6 +86,7 @@
                 <button id="joinBtn" onclick="joinMeeting()">Join Meeting</button>
                 <button id="leaveBtn" onclick="leaveMeeting()" disabled>Leave Meeting</button>
                 <button id="statusBtn" onclick="getStatus()">Get Status</button>
+                <button onclick="testInitialization()" style="background-color: #007acc; margin-left: 10px;">Test Init</button>
             </div>
         </div>
         

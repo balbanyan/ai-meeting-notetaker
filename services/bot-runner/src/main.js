@@ -68,12 +68,13 @@ class BotRunnerApp {
     this.mainWindow = new BrowserWindow({
       width: 1200,
       height: 800,
-      show: false, // Start hidden for headless operation
+      show: true, // Show window for testing and debugging
       webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
+        nodeIntegration: true, // Enable Node.js integration for require()
+        contextIsolation: false, // Disable context isolation to allow require()
         preload: path.join(__dirname, 'preload.js'),
-        webSecurity: false // Needed for Webex SDK
+        webSecurity: false, // Needed for Webex SDK
+        allowRunningInsecureContent: true // Additional setting for Webex SDK
       }
     });
 
