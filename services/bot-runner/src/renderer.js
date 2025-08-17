@@ -144,6 +144,11 @@ async function initializeWebexSDK() {
         
         addLog('✅ Webex meetings namespace available');
         
+        // Register device with Webex services (required for joining meetings)
+        addLog('📱 Registering device with Webex...');
+        await webex.meetings.register();
+        addLog('✅ Device registered successfully');
+        
         isInitialized = true;
         updateStatus('Ready - Not in meeting');
         addLog('🎉 Webex SDK initialization complete!', 'info');
@@ -170,7 +175,7 @@ async function initializeWebexSDK() {
 }
 
 // Join meeting following official documentation
-async function joinMeeting(meetingLinkOrId, hostEmail = null) {
+async function joinMeetingCore(meetingLinkOrId, hostEmail = null) {
     try {
         if (!isInitialized || !webex) {
             throw new Error('Webex SDK not initialized');
@@ -237,7 +242,7 @@ async function joinMeeting(meetingLinkOrId, hostEmail = null) {
 }
 
 // Leave meeting following official documentation
-async function leaveMeeting() {
+async function leaveMeetingCore() {
     try {
         if (!currentMeeting) {
             throw new Error('No active meeting to leave');
@@ -305,7 +310,7 @@ async function joinMeetingUI() {
     }
     
     try {
-        await joinMeeting(meetingLink, hostEmail || null);
+        await joinMeetingCore(meetingLink, hostEmail || null);
     } catch (error) {
         // Error already logged in joinMeeting function
     }
@@ -313,7 +318,7 @@ async function joinMeetingUI() {
 
 async function leaveMeetingUI() {
     try {
-        await leaveMeeting();
+        await leaveMeetingCore();
     } catch (error) {
         // Error already logged in leaveMeeting function
     }
@@ -361,10 +366,10 @@ window.leaveMeeting = leaveMeetingUI;
 window.getStatus = getStatusUI;
 window.testInitialization = testInitialization;
 
-// Expose bot API for IPC calls
+// Expose bot API for IPC calls (using core functions, not UI wrappers)
 window.webexBot = {
-    joinMeeting: joinMeeting,
-    leaveMeeting: leaveMeeting,
+    joinMeeting: joinMeetingCore,        // Core function
+    leaveMeeting: leaveMeetingCore,      // Core function  
     getMeetingStatus: getMeetingStatus,
     isInitialized: () => isInitialized,
     getWebex: () => webex
