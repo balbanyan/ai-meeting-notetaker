@@ -1,0 +1,14 @@
+{
+  "name": "@ai-notetaker/shared-prompts",
+  "version": "0.1.0",
+  "description": "Shared AI prompts for summary and chatbot",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.0"
+  }
+}
