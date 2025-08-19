@@ -53,16 +53,16 @@ ai-meeting-notetaker/
 - Groq LLM API (summaries & chat)
 - Vector embeddings for semantic search
 
-## Getting Started
+## Quick Start
 
 ### Prerequisites
 
 - Node.js 18+ and npm
-- Python 3.12+ with pip
+- Python 3.11+ with pip
 - Docker and Docker Compose
-- Webex account with access token
+- Webex access token or Guest Issuer credentials
 
-### Environment Setup
+### 🚀 **Startup Instructions**
 
 1. **Clone the repository**
    ```bash
@@ -70,104 +70,154 @@ ai-meeting-notetaker/
    cd ai-meeting-notetaker
    ```
 
-2. **Set up environment variables**
-   
-   Copy `.env.example` files in each service directory and fill in your values:
-   
-   **Backend** (`services/backend/.env`):
-   ```env
-   DATABASE_URL=postgresql://ai_notetaker:secure_password@localhost:5432/ai_notetaker
-   REDIS_URL=redis://localhost:6379/0
-   MINIO_URL=http://localhost:9000
-   GROQ_API_KEY=your-groq-api-key
-   OPENAI_API_KEY=your-openai-api-key
-   BOT_SERVICE_TOKEN=your-generated-service-token
-   ```
-
-   **Bot Runner** (`services/bot-runner/.env`):
-   ```env
-   WEBEX_ACCESS_TOKEN=your-webex-access-token
-   BACKEND_API_URL=http://localhost:8000
-   BACKEND_WS_URL=ws://localhost:8000
-   BOT_SERVICE_TOKEN=same-as-backend-token
-   ```
-
-   **Frontend** (`services/frontend/.env.local`):
-   ```env
-   NEXT_PUBLIC_API_URL=http://localhost:8000
-   NEXT_PUBLIC_WS_URL=ws://localhost:8000
-   NEXT_PUBLIC_WEBEX_ACCESS_TOKEN=your-webex-access-token
-   NEXTAUTH_URL=http://localhost:3000
-   NEXTAUTH_SECRET=your-generated-secret
-   ```
-
-3. **Start infrastructure services**
+2. **Start infrastructure services**
    ```bash
    cd infra
    docker compose up -d
    ```
+   This starts PostgreSQL, Redis, and MinIO services.
 
-4. **Set up and start backend**
+3. **Set up and start backend**
    ```bash
    cd services/backend
-   pip install -r requirements.txt  # or use poetry install
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   pip install -e .
    alembic upgrade head
-   PYTHONPATH=. python -m uvicorn app.main:app --reload --port 8000
+   python -m uvicorn app.main:app --reload --port 8000
    ```
 
-5. **Set up and start bot runner**
+4. **Set up and start bot runner**
    ```bash
    cd services/bot-runner
    npm install
    npm run dev
    ```
 
-6. **Set up and start frontend**
+5. **Set up and start frontend**
    ```bash
    cd services/frontend
    npm install
    npm run dev
    ```
 
-### Usage
+### 🔧 **Environment Configuration**
+
+Create `.env` files in each service directory based on the examples:
+
+**Root directory** (`.env`):
+```env
+# Database
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/ai_notetaker
+
+# Redis
+REDIS_URL=redis://localhost:6379
+
+# MinIO/S3
+S3_ENDPOINT_URL=http://localhost:9000
+S3_ACCESS_KEY=minioadmin
+S3_SECRET_KEY=minioadmin
+S3_BUCKET_NAME=ai-notetaker
+
+# Bot Service Authentication
+BOT_SERVICE_TOKEN=your-bot-service-token-here
+
+# AI Services
+GROQ_API_KEY=your-groq-api-key-here
+OPENAI_API_KEY=your-openai-api-key-here
+
+# Webex Authentication (choose one)
+WEBEX_ACCESS_TOKEN=your-webex-access-token
+# OR
+WEBEX_GUEST_ISSUER_ID=your-guest-issuer-id
+WEBEX_GUEST_ISSUER_SECRET=your-guest-issuer-secret
+
+# Bot Configuration
+BOT_NAME=AI Space Notetaker
+BOT_DISPLAY_NAME=AI Meeting Notetaker
+BOT_EMAIL=ai-notetaker@yourcompany.com
+```
+
+**Frontend** (`services/frontend/.env.local`):
+```env
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-generated-secret
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_WS_URL=ws://localhost:8000
+NEXT_PUBLIC_WEBEX_ACCESS_TOKEN=your-webex-access-token
+```
+
+### 🎯 **Current Working Features**
+
+After starting all services, you can:
 
 1. **Access the frontend** at `http://localhost:3000`
-2. **Sign in** using development mode (uses your Webex access token)
-3. **Add AI Bot to Meeting** by entering a Webex meeting ID or URL
-4. **Join the meeting** - the bot will appear as "AI Space Notetaker"
-5. **View live transcript** in real-time during the meeting
-6. **Generate summaries** after the meeting ends
-7. **Chat with meeting content** using the RAG-powered chatbot
+2. **Add AI Bot to Meeting**: Click the "Add Bot" button and enter:
+   - Webex meeting URL or ID
+   - Meeting title
+   - Host email
+3. **Integration Testing**: The system will:
+   - ✅ Create a meeting record in the database
+   - ✅ Call the bot-runner service to join the meeting
+   - ✅ Display success/error messages with proper error handling
+   - ✅ Update meeting status in real-time
+
+### 📊 **Service Architecture (Currently Working)**
+
+```
+Frontend (Next.js)     Backend (FastAPI)     Bot-runner (Electron)     Webex SDK
+      ↓                        ↓                        ↓                  ↓
+User clicks "Add Bot" → POST /meetings/join → POST /api/join-meeting → meeting.join()
+      ↓                        ↓                        ↓                  ↓
+   Response ←————————— Database update ←——————— Status update ←——— Success/Error
+```
+
+**What's working now:**
+- ✅ Complete request/response flow
+- ✅ Database integration with PostgreSQL
+- ✅ Service-to-service HTTP communication
+- ✅ Error propagation and user feedback
+- ✅ Meeting status management
+
+**Next phases will add:**
+- 🚧 Audio streaming and transcription
+- 🚧 Real-time transcript display
+- 🚧 AI-powered summaries and chat
 
 ## Development Status
 
-### ✅ Completed Features
+### ✅ **Phase 1 & 2 Complete: Core Infrastructure & Communication Bridge**
 - [x] Monorepo structure and development environment
-- [x] PostgreSQL + pgvector + Redis + MinIO infrastructure
+- [x] PostgreSQL + pgvector + Redis + MinIO infrastructure  
 - [x] FastAPI backend with health checks and API endpoints
-- [x] Database models and migrations
+- [x] Database models and migrations (SQLAlchemy + Alembic)
 - [x] Next.js frontend with development authentication
 - [x] User-facing meeting management (join/leave)
 - [x] OpenAPI client generation and type safety
 - [x] Basic UI components and routing
+- [x] **Bot runner Electron application with Webex SDK integration**
+- [x] **HTTP API bridge: Frontend ↔ Backend ↔ Bot-runner ↔ Webex**
+- [x] **Comprehensive error handling and status management**
+- [x] **Real-time meeting status synchronization**
+- [x] **Service-to-service authentication (Bearer tokens)**
 
-### 🚧 In Development
-- [ ] Bot runner Webex integration
-- [ ] Real-time audio processing and streaming
+### 🚧 **Phase 3-5: In Development**
+- [ ] Real-time audio processing and streaming (WebSocket)
 - [ ] STT worker (Groq Whisper integration)
-- [ ] Summary generation worker
-- [ ] Vector embedding worker
+- [ ] Summary generation worker (OpenAI/Groq LLM)
+- [ ] Vector embedding worker for RAG
 - [ ] WebSocket live transcript updates
 - [ ] RAG chatbot functionality
-
-### 📋 Planned Features
-- [ ] Webex OAuth authentication (replacing personal tokens)
 - [ ] Meeting participant email resolution
+
+### 📋 **Future Enhancements**
+- [ ] Webex OAuth authentication (replacing personal tokens)
 - [ ] Advanced summary types (action items, decisions, etc.)
 - [ ] Meeting search and filtering
 - [ ] Export functionality (PDF, DOCX)
 - [ ] Slack/Teams integrations
 - [ ] Mobile app support
+- [ ] Production deployment configuration
 
 ## API Documentation
 

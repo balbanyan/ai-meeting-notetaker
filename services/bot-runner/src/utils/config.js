@@ -21,6 +21,11 @@ const config = {
     wsUrl: process.env.BACKEND_WS_URL || 'ws://localhost:8000',
   },
   
+  // Bot API Server Configuration
+  api: {
+    port: parseInt(process.env.BOT_API_PORT) || 3001,
+  },
+  
   // Audio Configuration
   audio: {
     chunkDurationMs: parseInt(process.env.AUDIO_CHUNK_DURATION_MS) || 8000,

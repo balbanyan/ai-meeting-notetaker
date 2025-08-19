@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     REDIS_QUEUE_NAME: str = "ai-notetaker-jobs"
     WORKER_CONCURRENCY: int = 2
     
+    # Bot Runner Configuration
+    BOT_RUNNER_URL: str = "http://127.0.0.1:3001"
+    
     class Config:
         env_file = ".env"
 

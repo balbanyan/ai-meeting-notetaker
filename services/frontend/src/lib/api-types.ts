@@ -179,7 +179,9 @@ export interface components {
       /** Answer */
       answer: string;
       /** Sources */
-      sources: Record<string, never>[];
+      sources: {
+          [key: string]: unknown;
+        }[];
       /**
        * Meeting Id
        * Format: uuid

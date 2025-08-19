@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const { validateConfig } = require('./utils/config');
 const { createLogger } = require('./utils/logger');
+const { BotAPIServer } = require('./api/server');
 
 const logger = createLogger('ElectronMain');
 
@@ -9,6 +10,7 @@ class BotRunnerApp {
   constructor() {
     this.mainWindow = null;
     this.isQuitting = false;
+    this.apiServer = new BotAPIServer();
   }
 
   /**
@@ -19,6 +21,9 @@ class BotRunnerApp {
       // Validate configuration
       validateConfig();
       logger.info('Configuration validated successfully');
+      
+      // Start API server
+      await this.startApiServer();
       
       // Set up Electron app events
       this.setupAppEvents();
@@ -31,6 +36,30 @@ class BotRunnerApp {
     } catch (error) {
       logger.error('Failed to initialize Bot Runner App:', error);
       app.quit();
+    }
+  }
+
+  /**
+   * Start the API server
+   */
+  async startApiServer() {
+    try {
+      logger.info('Starting Bot API Server...');
+      await this.apiServer.start();
+      logger.info('✅ Bot API Server started successfully');
+    } catch (error) {
+      logger.error('❌ Failed to start Bot API Server:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update API server with main window reference
+   */
+  updateApiServerWindow() {
+    if (this.apiServer && this.mainWindow) {
+      this.apiServer.setMainWindow(this.mainWindow);
+      logger.info('API server updated with main window reference');
     }
   }
 
@@ -54,8 +83,9 @@ class BotRunnerApp {
       }
     });
 
-    app.on('before-quit', () => {
+    app.on('before-quit', async () => {
       this.isQuitting = true;
+      await this.cleanup();
     });
   }
 
@@ -88,6 +118,9 @@ class BotRunnerApp {
 
     this.mainWindow.on('ready-to-show', () => {
       logger.info('Main window ready');
+      
+      // Update API server with window reference
+      this.updateApiServerWindow();
       
       // Show window only in development
       if (process.env.NODE_ENV === 'development') {
@@ -163,6 +196,24 @@ class BotRunnerApp {
   sendToRenderer(channel, data) {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(channel, data);
+    }
+  }
+
+  /**
+   * Cleanup resources before app exit
+   */
+  async cleanup() {
+    try {
+      logger.info('Cleaning up resources...');
+      
+      // Stop API server
+      if (this.apiServer) {
+        await this.apiServer.stop();
+      }
+      
+      logger.info('Cleanup completed');
+    } catch (error) {
+      logger.error('Error during cleanup:', error);
     }
   }
 }
