@@ -1,0 +1,20 @@
+{
+  "name": "ai-notetaker-bot-runner-v2",
+  "version": "2.0.0",
+  "description": "Minimal Electron bot for Webex meetings - MVP",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --enable-logging"
+  },
+  "dependencies": {
+    "axios": "^1.5.0",
+    "crypto-js": "^4.1.1",
+    "dotenv": "^16.3.0",
+    "electron": "^27.0.0",
+    "webex": "^3.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0"
+  }
+}
