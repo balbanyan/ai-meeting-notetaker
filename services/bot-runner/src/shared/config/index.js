@@ -26,6 +26,13 @@ const config = {
     sampleRate: 16000,
     channels: 1,
   },
+  
+  // Runtime Mode Configuration
+  mode: {
+    // BOT_MODE: 'gui' | 'headless' - determines if GUI or headless mode
+    type: process.env.BOT_MODE || 'gui',
+    enableLogging: process.env.ENABLE_LOGGING === 'true',
+  },
 };
 
 // Validate required configuration

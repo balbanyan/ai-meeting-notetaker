@@ -1,6 +1,6 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
-const { validateConfig } = require('./config');
+const { validateConfig } = require('../shared/config');
 
 class BotRunnerApp {
   constructor() {
@@ -68,10 +68,14 @@ class BotRunnerApp {
     // Load the HTML file
     this.mainWindow.loadFile(path.join(__dirname, 'renderer.html'));
 
-    // Open DevTools for development
-    if (process.env.NODE_ENV === 'development') {
-      this.mainWindow.webContents.openDevTools();
-    }
+    // Open DevTools for debugging console logs
+    this.mainWindow.webContents.openDevTools();
+    
+    // Log when DevTools is ready
+    this.mainWindow.webContents.once('devtools-opened', () => {
+      console.log('🔧 DevTools opened - Console available for debugging');
+      console.log('🔍 Try: debugWebex(), debugMeeting(), testAudio()');
+    });
 
     console.log('✅ Main window created');
   }

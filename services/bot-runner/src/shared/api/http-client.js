@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { config } = require('./config');
+const { config } = require('../config');
 
 class BackendClient {
   constructor() {
@@ -25,41 +25,45 @@ class BackendClient {
         formData.append('host_email', hostEmail);
       }
 
-      const response = await axios.post(
-        `${this.baseURL}/audio/chunk`, 
-        formData,
-        {
-          headers: {
-            'Authorization': `Bearer ${this.token}`,
-            'Content-Type': 'multipart/form-data'
-          }
+      const response = await axios.post(`${this.baseURL}/audio/chunk`, formData, {
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'multipart/form-data'
         }
-      );
+      });
 
       console.log(`✅ CHUNK SENT - Chunk: ${chunkId}, Status: ${response.data.status}`);
+      
+      // For Electron: also log to UI if addLog function is available
+      if (typeof window !== 'undefined' && window.addLog) {
+        window.addLog(`✅ Audio chunk sent successfully - Status: ${response.data.status}`, 'success');
+      }
+      
       return response.data;
 
     } catch (error) {
-      console.error(`❌ CHUNK SEND FAILED - ${error.message}`);
-      if (error.response) {
-        console.error(`   Status: ${error.response.status}`);
-        console.error(`   Error: ${error.response.data?.detail || 'Unknown error'}`);
-      }
+      console.error(`❌ CHUNK SEND FAILED - Chunk: ${chunkId}`, error.response?.data || error.message);
       throw error;
     }
   }
 
   /**
-   * Test backend connection
+   * Test connection to backend
    */
   async testConnection() {
     try {
-      const response = await axios.get(`${this.baseURL}/health`);
+      const response = await axios.get(`${this.baseURL}/health`, {
+        headers: {
+          'Authorization': `Bearer ${this.token}`
+        }
+      });
+      
       console.log('✅ Backend connection successful:', response.data);
-      return true;
+      return response.data;
+      
     } catch (error) {
-      console.error('❌ Backend connection failed:', error.message);
-      return false;
+      console.error('❌ Backend connection failed:', error.response?.data || error.message);
+      throw error;
     }
   }
 }

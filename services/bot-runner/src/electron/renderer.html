@@ -134,7 +134,7 @@
         <div>
             <button class="button" id="joinBtn" onclick="joinMeeting()">Join Meeting</button>
             <button class="button danger" id="leaveBtn" onclick="leaveMeeting()" disabled>Leave Meeting</button>
-            <button class="button" onclick="testBackend()">Test Backend</button>
+            <button class="button" onclick="testBackendUI()">Test Backend</button>
         </div>
 
         <div id="status" class="status" style="display: none;"></div>
@@ -143,6 +143,9 @@
             <div class="log-entry info">🚀 Bot Runner V2 ready - Enter meeting details above</div>
         </div>
     </div>
+
+    <!-- Audio elements will be created dynamically to avoid reuse issues -->
+    <audio id="self-view-audio" autoplay muted style="display: none;"></audio>
 
     <script src="renderer.js"></script>
 </body>
