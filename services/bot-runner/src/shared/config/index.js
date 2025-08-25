@@ -3,8 +3,7 @@ require('dotenv').config();
 const config = {
   // Webex Configuration
   webex: {
-    guestIssuerId: process.env.WEBEX_GUEST_ISSUER_ID,
-    guestIssuerSecret: process.env.WEBEX_GUEST_ISSUER_SECRET,
+    botAccessToken: process.env.WEBEX_BOT_ACCESS_TOKEN,
     apiBaseUrl: process.env.WEBEX_API_BASE_URL || 'https://webexapis.com/v1',
   },
   
@@ -38,8 +37,7 @@ const config = {
 // Validate required configuration
 function validateConfig() {
   const required = [
-    'webex.guestIssuerId',
-    'webex.guestIssuerSecret', 
+    'webex.botAccessToken',
     'bot.serviceToken'
   ];
   
@@ -50,7 +48,7 @@ function validateConfig() {
     }
   }
   
-  console.log('✅ Configuration validated successfully');
+  console.log('✅ Configuration validated successfully (using Bot Access Token)');
 }
 
 module.exports = { config, validateConfig };

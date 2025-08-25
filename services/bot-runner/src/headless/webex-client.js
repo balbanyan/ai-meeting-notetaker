@@ -7,8 +7,8 @@
 const { BackendClient } = require('../shared/api/http-client');
 const { AudioProcessor } = require('../shared/audio/processor');
 const { config } = require('../shared/config');
-const { generateUUID, createLogger, testBackend } = require('../shared/utils');
-const { JWTGenerator } = require('../shared/webex/jwt');
+const { createLogger, testBackend } = require('../shared/utils');
+// JWT no longer needed - using bot token
 
 class PuppeteerWebexClient {
   constructor(page) {
@@ -19,18 +19,14 @@ class PuppeteerWebexClient {
     
     // Use shared components
     this.backendClient = new BackendClient();
-    this.audioProcessor = new AudioProcessor(this.backendClient);
+    this.audioProcessor = null; // Will be created when we have meeting details
     this.logger = createLogger('Headless');
-    this.jwtGenerator = new JWTGenerator(config, this.logger);
+    // No longer need JWT generator - using bot token
   }
 
   // ============================================================================
-  // JWT GENERATION (using shared component)
+  // BOT TOKEN AUTHENTICATION (replaces JWT)
   // ============================================================================
-
-  buildJWT() {
-    return this.jwtGenerator.buildJWT();
-  }
 
   // ============================================================================
   // BACKEND CONNECTION TEST
@@ -62,7 +58,11 @@ class PuppeteerWebexClient {
       await this.initializeWebexAndJoin(meetingUrl);
       
       // Set up audio processing
+      await this.initializeAudioProcessor();
       await this.setupAudioProcessing();
+      
+      // Start monitoring for browser close requests (following docs pattern)
+      this.startBrowserCloseMonitoring();
 
       this.logger('🎉 Meeting joined successfully with headless client!', 'success');
       this.isInMeeting = true;
@@ -134,10 +134,8 @@ class PuppeteerWebexClient {
 
   async initializeWebexAndJoin(meetingUrl) {
     this.logger('🔧 Initializing Webex SDK in browser...', 'info');
-
-    const jwtToken = this.buildJWT();
     
-    const result = await this.page.evaluate(async (meetingUrl, jwtToken, config) => {
+    const result = await this.page.evaluate(async (meetingUrl, config) => {
       try {
         console.log('🔧 Starting Webex SDK initialization...');
         
@@ -147,19 +145,39 @@ class PuppeteerWebexClient {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
 
-        // Initialize Webex
+        // Initialize Webex SDK with bot access token (official method)
         const webex = window.Webex.init({
+          credentials: {
+            access_token: config.webex.botAccessToken
+          },
           config: {
             logger: { level: 'info' },
             meetings: { enableRtx: true }
           }
         });
 
-        console.log('🔐 Authenticating with JWT...');
-        await webex.authorization.requestAccessTokenFromJwt({ jwt: jwtToken });
+        console.log('✅ Webex SDK initialized with bot access token');
         
-        console.log('📱 Registering device...');
-        await webex.meetings.register();
+        // Simple browser close flag (following docs pattern)
+        window.shouldCloseBrowser = false;
+        
+        // Validate bot authentication before registering for meetings
+        console.log('🔐 Validating bot authentication...');
+        try {
+            const botInfo = await webex.people.get('me');
+            console.log(`✅ Bot authenticated: ${botInfo.displayName}`);
+            
+            // Register with Webex Cloud
+            console.log('📱 Registering with Webex Cloud...');
+            await webex.meetings.register()
+              .catch((err) => {
+                console.error('Registration error:', err);
+                throw err;
+              });
+        } catch (err) {
+            console.error(`❌ Bot authentication failed: ${err.message}`);
+            throw err;
+        }
         
         console.log('✅ Webex SDK initialized successfully');
 
@@ -278,12 +296,46 @@ class PuppeteerWebexClient {
           }
         });
 
+        // Simple meeting events (following docs pattern)
         meeting.on('meeting:left', () => {
           console.log('👋 Meeting left');
         });
 
         meeting.on('meeting:ended', () => {
           console.log('🔚 Meeting ended');
+        });
+        
+        meeting.on('meeting:inactive', () => {
+          console.log('💤 Meeting inactive');
+        });
+
+        // Handle media events (following docs pattern)
+        let mediaStreamCount = 0;
+        let stoppedStreamCount = 0;
+        
+        meeting.on('media:ready', (media) => {
+          mediaStreamCount++;
+          console.log(`🎵 Media ready: ${media.type} (total: ${mediaStreamCount})`);
+        });
+
+        meeting.on('media:stopped', (media) => {
+          stoppedStreamCount++;
+          console.log(`🔇 Media stopped: ${media.type} (stopped: ${stoppedStreamCount}/${mediaStreamCount})`);
+          
+          // Clean up media elements (following docs)
+          if (media.type === 'remoteAudio') {
+            let remoteAudioElement = document.getElementById('remote-view-audio');
+            if (remoteAudioElement) {
+              remoteAudioElement.srcObject = null;
+              remoteAudioElement.remove();
+            }
+          }
+          
+          // If all media streams stopped, likely meeting ended
+          if (stoppedStreamCount >= mediaStreamCount && mediaStreamCount > 0) {
+            console.log('📡 All media streams stopped - meeting likely ended');
+            window.shouldCloseBrowser = true;
+          }
         });
 
         // Join meeting
@@ -302,7 +354,7 @@ class PuppeteerWebexClient {
         console.error('❌ Browser initialization failed:', error);
         return { success: false, error: error.message };
       }
-    }, meetingUrl, jwtToken, config);
+    }, meetingUrl, config);
 
     if (!result.success) {
       throw new Error(`Browser initialization failed: ${result.error}`);
@@ -310,6 +362,70 @@ class PuppeteerWebexClient {
 
     this.logger('✅ Webex initialized and meeting joined in browser', 'success');
     return result;
+  }
+
+  /**
+   * Monitor browser for close requests (critical for GCP to prevent hanging browsers)
+   */
+  startBrowserCloseMonitoring() {
+    this.closeMonitorInterval = setInterval(async () => {
+      try {
+        const shouldClose = await this.page.evaluate(() => window.shouldCloseBrowser);
+        if (shouldClose) {
+          this.logger(`🚪 Browser close requested - meeting ended`, 'warn');
+          await this.cleanup();
+          return;
+        }
+      } catch (error) {
+        // Page might be closed, stop monitoring
+        this.logger('⚠️ Browser monitoring stopped (page closed)', 'info');
+        clearInterval(this.closeMonitorInterval);
+      }
+    }, 1000); // Check every second
+  }
+
+  /**
+   * Cleanup browser and resources (critical for GCP)
+   */
+  async cleanup() {
+    this.logger('🧹 Cleaning up headless browser resources...', 'info');
+    
+    // Stop monitoring
+    if (this.closeMonitorInterval) {
+      clearInterval(this.closeMonitorInterval);
+    }
+    
+    // Stop audio processing
+    if (this.audioInterval) {
+      clearInterval(this.audioInterval);
+    }
+    
+    // Close page and browser
+    try {
+      if (this.page) {
+        await this.page.close();
+        this.logger('✅ Browser page closed', 'success');
+      }
+    } catch (error) {
+      this.logger(`⚠️ Error closing page: ${error.message}`, 'warn');
+    }
+    
+    this.logger('✅ Headless browser cleanup completed', 'success');
+  }
+
+  /**
+   * Initialize AudioProcessor with meeting details and backend chunk count
+   */
+  async initializeAudioProcessor() {
+    this.logger('🔧 Initializing AudioProcessor with meeting details...', 'info');
+    
+    // Create AudioProcessor with proper parameters
+    this.audioProcessor = new AudioProcessor(this.meetingId, this.hostEmail, this.backendClient);
+    
+    // Initialize chunk count from backend to continue sequence
+    await this.audioProcessor.initializeChunkCount();
+    
+    this.logger(`✅ AudioProcessor initialized - Starting from chunk #${this.audioProcessor.chunkCount + 1}`, 'success');
   }
 
   async setupAudioProcessing() {
@@ -345,11 +461,11 @@ class PuppeteerWebexClient {
   }
 
   async processAudioChunk(audioChunk) {
-    const chunkId = generateUUID();
+    this.audioProcessor.chunkCount++;
+    const chunkId = this.audioProcessor.chunkCount;
     
     // Use shared audio processor for processing
-    this.audioProcessor.chunkCount++;
-    this.logger(`🔄 Processing audio chunk #${this.audioProcessor.chunkCount}`, 'info');
+    this.logger(`🔄 Processing audio chunk #${chunkId}`, 'info');
     this.logger(`📊 Buffer: ${audioChunk.length} samples, Duration: ~${config.audio.chunkDurationMs/1000}s`, 'info');
     
     // Use shared audio processor for conversion and sending

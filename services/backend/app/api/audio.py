@@ -12,10 +12,11 @@ router = APIRouter()
 class AudioChunkResponse(BaseModel):
     id: str  # UUID now
     meeting_id: str
-    chunk_id: str
+    chunk_id: int  # Sequential number now
     transcription_status: str  # "ready", "processed", "failed"
     host_email: str = None
     created_at: str
+    updated_at: str
     
     class Config:
         from_attributes = True
@@ -24,13 +25,13 @@ class AudioChunkResponse(BaseModel):
 class SaveChunkResponse(BaseModel):
     status: str
     message: str
-    chunk_id: str
+    chunk_id: int
 
 
 @router.post("/audio/chunk", response_model=SaveChunkResponse)
 async def save_audio_chunk(
     meeting_id: str = Form(...),
-    chunk_id: str = Form(...),
+    chunk_id: int = Form(...),
     host_email: str = Form(None),
     audio_file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -68,6 +69,25 @@ async def save_audio_chunk(
         db.rollback()
         print(f"❌ CHUNK SAVE FAILED - {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to save audio chunk: {str(e)}")
+
+
+@router.get("/audio/chunks/count")
+async def get_meeting_chunk_count(meeting_id: str, db: Session = Depends(get_db)):
+    """Get the maximum chunk_id for a meeting (for continuing sequence)"""
+    try:
+        from sqlalchemy import func
+        max_chunk_id = db.query(func.max(AudioChunk.chunk_id)).filter(
+            AudioChunk.meeting_id == meeting_id
+        ).scalar()
+        
+        # Return 0 if no chunks exist for this meeting
+        chunk_count = max_chunk_id if max_chunk_id is not None else 0
+        
+        return {"meeting_id": meeting_id, "max_chunk_id": chunk_count}
+        
+    except Exception as e:
+        print(f"❌ CHUNK COUNT FAILED - {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get chunk count: {str(e)}")
 
 
 @router.get("/audio/chunks/{meeting_id}", response_model=List[AudioChunkResponse])

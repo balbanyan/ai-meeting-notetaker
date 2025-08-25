@@ -1,15 +1,15 @@
 # AI Meeting Notetaker V2
 
-An AI-powered meeting notetaker for Webex meetings that automatically captures and processes meeting audio with both GUI and headless operation modes.
+An AI-powered meeting notetaker for Webex meetings that automatically captures and processes meeting audio with both GUI and headless operation modes. Designed for production deployment on GCP with automatic browser cleanup.
 
 ## 🚀 Features
 
 - **Dual Mode Operation**: GUI (Electron) and Headless (Puppeteer) bot modes
-- **Webex Integration**: Seamlessly join Webex meetings using official Webex Browser SDK
+- **Webex Bot Integration**: Direct authentication using Webex Developer Bot access tokens
 - **Real-time Audio Capture**: High-quality audio recording in 10-second chunks
-- **PostgreSQL Storage**: Persistent storage with optimized database schema
+- **PostgreSQL Storage**: Persistent storage with optimized database schema and timestamps
+- **Auto Browser Cleanup**: Prevents hanging browsers in production
 - **Host Detection**: Automatically identifies and stores meeting host information
-- **Secure Authentication**: JWT-based authentication with Webex Guest Issuer
 - **Modern Architecture**: Clean separation of concerns with shared utilities
 
 ## 🏗️ Architecture
@@ -43,7 +43,7 @@ An AI-powered meeting notetaker for Webex meetings that automatically captures a
 - **Node.js** 18+
 - **Python** 3.11+
 - **PostgreSQL** running on localhost:5432
-- **Webex Guest Issuer** credentials
+- **Webex Developer Bot** with access token
 
 ## ⚡ Quick Start
 
@@ -57,15 +57,27 @@ psql -U postgres -c "CREATE DATABASE ai_notetaker_v2;"
 ```
 
 ### 2. Environment Configuration
+
+**Create Bot-Runner Environment:**
 ```bash
-# Copy environment template
+cd services/bot-runner
 cp .env.example .env
 
 # Edit .env with your credentials:
-# - WEBEX_GUEST_ISSUER_ID
-# - WEBEX_GUEST_ISSUER_SECRET  
-# - BOT_SERVICE_TOKEN
-# - BOT_MODE (gui/headless)
+# - WEBEX_BOT_ACCESS_TOKEN=your_webex_bot_access_token
+# - BOT_SERVICE_TOKEN=your_secure_token
+# - BOT_MODE=gui  # or 'headless'
+```
+
+**Create Backend Environment:**
+```bash
+cd ../backend
+cp .env.example .env
+
+# Edit .env with your credentials:
+# - DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/ai_notetaker_v2
+# - BOT_SERVICE_TOKEN=your_secure_token
+# - BOT_RUNNER_URL=http://localhost:3001
 ```
 
 ### 3. Install Dependencies
@@ -85,8 +97,18 @@ cd ../..
 
 ### 4. Start Services
 
-**Option A: Quick Start (all services)**
+**Option A: Quick Start Script**
 ```bash
+# Start backend only
+./start.sh backend
+
+# Start GUI mode bot and backed
+./start.sh gui
+
+# Start headless mode bot and backend
+./start.sh headless
+
+# Start all services
 ./start.sh
 ```
 
@@ -99,11 +121,20 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 # Terminal 2 - Bot Runner (GUI mode)
 cd services/bot-runner  
-npm run start:gui
+BOT_MODE=gui npm start
 
 # OR Terminal 2 - Bot Runner (Headless mode)
 cd services/bot-runner
-npm run start:headless
+BOT_MODE=headless npm start
+```
+
+**Verify Services:**
+```bash
+# Check backend health
+curl http://localhost:8000/health
+
+# Check headless bot status (if running)
+curl http://localhost:3001/status
 ```
 
 ## 🎯 Usage
@@ -117,54 +148,78 @@ npm run start:headless
 
 ### Headless Mode (Production)
 1. Start backend and bot-runner in headless mode
-2. Send API request to join meeting:
+2. Join meeting via API:
 ```bash
+# Join a meeting
 curl -X POST http://localhost:3001/join \
   -H "Content-Type: application/json" \
-  -d '{"meetingUrl": "https://example.webex.com/meet/..."}'
+  -d '{"meetingUrl": ""}'
+
+# Or via backend API
+curl -X POST http://localhost:8000/meetings/join \
+  -H "Content-Type: application/json" \
+  -d '{"meeting_url": ""}'
 ```
+
 
 ### API Endpoints
 
 **Backend (Port 8000):**
 - `GET /health` - Health check
 - `POST /audio/chunk` - Submit audio chunks
+- `GET /audio/chunks/{meeting_id}/count` - Get max chunk ID for meeting
+- `GET /audio/chunks/{meeting_id}` - Get all chunks for meeting
+- `POST /meetings/join` - Join meeting via backend (calls bot-runner)
 
 **Bot Runner (Port 3001):**
 - `POST /join` - Join a meeting (headless mode)
-- `POST /leave` - Leave current meeting
-- `GET /status` - Get bot status
+- `GET /status` - Get bot status and active meetings
 
 ## 🗃️ Database Schema
 
 **audio_chunks table:**
-- `id` (PK) - Unique identifier
-- `meeting_id` - Meeting session ID
-- `chunk_id` - Individual chunk ID  
+- `id` (UUID, PK) - Unique identifier
+- `meeting_id` (String) - Meeting URL/session ID
+- `chunk_id` (Integer) - Sequential chunk number (1, 2, 3...)
 - `chunk_audio` (BYTEA) - WAV audio data
-- `chunk_transcript` - Transcript text (optional)
-- `transcription_status` - Status: 'ready', 'processed', 'failed'
-- `host_email` - Meeting host email
-- `created_at` - Timestamp
+- `chunk_transcript` (String) - Transcript text (optional)
+- `transcription_status` (String) - Status: 'ready', 'processed', 'failed'
+- `host_email` (String) - Meeting host email
+- `created_at` (Timestamp) - When chunk was created
+- `updated_at` (Timestamp) - When chunk was last modified
 
 ## 🔧 Configuration
 
 ### Environment Variables
-```bash
-# Webex Configuration
-WEBEX_GUEST_ISSUER_ID=your_guest_issuer_id
-WEBEX_GUEST_ISSUER_SECRET=your_guest_issuer_secret
 
-# Bot Configuration  
-BOT_SERVICE_TOKEN=your_secure_bot_token
+**Bot-Runner (.env):**
+```bash
+# Webex Bot Authentication
+WEBEX_BOT_ACCESS_TOKEN=your_webex_bot_access_token_here
+WEBEX_API_BASE_URL=https://webexapis.com/v1
+
+# Bot Configuration
 BOT_DISPLAY_NAME="AI Meeting Notetaker"
 BOT_EMAIL=ai-notetaker@yourcompany.com
+BOT_SERVICE_TOKEN=your_secure_backend_auth_token
+
+# Backend Communication
+BACKEND_API_URL=http://localhost:8000
 
 # Operation Mode
 BOT_MODE=gui  # or 'headless'
+```
 
-# Backend Configuration
-BACKEND_URL=http://localhost:8000
+**Backend (.env):**
+```bash
+# Database Configuration
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/ai_notetaker_v2
+
+# Authentication
+BOT_SERVICE_TOKEN=your_secure_backend_auth_token
+
+# Bot Runner Communication
+BOT_RUNNER_URL=http://localhost:3001
 ```
 
 ### Audio Configuration
@@ -175,16 +230,27 @@ BACKEND_URL=http://localhost:8000
 
 ## 🚀 Deployment
 
-### Production Headless Setup
-1. Set `BOT_MODE=headless` in environment
-2. Deploy backend and bot-runner services
-3. Use API endpoints to control meeting participation
-4. Monitor logs for audio capture status
+### GCP Production Setup
+1. **Environment**: Set `BOT_MODE=headless`
+2. **Resources**: Configure adequate CPU/memory for concurrent meetings
+3. **Database**: Use Cloud SQL PostgreSQL
+4. **Secrets**: Store bot tokens in Google Secret Manager
+5. **Auto-scaling**: Configure based on meeting load
+6. **Monitoring**: Set up health checks and logging
+
+**Key GCP Considerations:**
+- **Browser Cleanup**: Auto-closes browsers when meetings end (prevents hanging)
+- **Multi-Meeting**: Single instance handles multiple concurrent meetings  
+- **Resource Limits**: Set memory/CPU limits to prevent runaway processes
+- **Health Checks**: Monitor `/health` and `/status` endpoints
 
 ### Docker Support
 ```bash
 # Build and run with Docker Compose
 docker-compose up -d
+
+# For production with resource limits
+docker run -m 2g --cpus="1.5" ai-meeting-notetaker-v2
 ```
 
 ## 🐛 Troubleshooting
@@ -192,19 +258,33 @@ docker-compose up -d
 **Common Issues:**
 
 1. **"Device not registered" error**
-   - Ensure using `webex.meetings.register()` not `webex.internal.device.register()`
+   - Ensure bot token has meeting permissions
+   - Verify using `webex.meetings.register()` not `webex.internal.device.register()`
 
 2. **Empty audio chunks**
    - Verify using official Webex SDK audio capture pattern
    - Check microphone permissions in browser/Electron
+   - Ensure bot token is valid and not expired
 
-3. **JWT authentication failed**
-   - Verify Guest Issuer credentials are correct
-   - Check JWT expiration time
+3. **Bot authentication failed**
+   - Verify `WEBEX_BOT_ACCESS_TOKEN` is correct
+   - Ensure bot has proper scopes for meetings
+   - Test bot token with `webex.people.get('me')`
 
 4. **Database connection failed**
    - Ensure PostgreSQL is running on port 5432
    - Verify database name and credentials
+   - Run migration if `updated_at` column missing
+
+5. **Browser not closing after meeting**
+   - Check media event handling in logs
+   - Verify `media:stopped` events are firing
+   - Monitor browser cleanup logs
+
+6. **Chunk ID sequence issues**
+   - Check if database schema updated to integer `chunk_id`
+   - Verify chunk count API endpoint working
+   - Clear old UUID-based chunks if migrating
 
 ## 📝 Development
 
@@ -228,10 +308,12 @@ ai-meeting-notetaker-v2/
 ```
 
 ### Key Files
-- `services/bot-runner/src/electron/renderer.js` - Main Electron renderer
-- `services/bot-runner/src/headless/webex-client.js` - Main headless client
-- `services/bot-runner/src/shared/webex/jwt.js` - JWT authentication
+- `services/bot-runner/src/electron/renderer.js` - Main Electron renderer with auto-close
+- `services/bot-runner/src/headless/webex-client.js` - Main headless client with browser cleanup
+- `services/bot-runner/src/shared/webex/jwt.js` - JWT utilities (legacy, for bot tokens now)
+- `services/bot-runner/src/shared/audio/processor.js` - Audio processing with sequential IDs
 - `services/backend/main.py` - Backend API entry point
+- `services/backend/app/api/meetings.py` - Meeting join API with bot-runner integration
 
 ## 📄 License
 
@@ -246,5 +328,3 @@ MIT License - see LICENSE file for details.
 5. Submit a pull request
 
 ---
-
-**Built with ❤️ for seamless meeting transcription**

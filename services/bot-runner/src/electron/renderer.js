@@ -9,8 +9,8 @@ const { config } = window.require('../shared/config');
 const { BackendClient } = window.require('../shared/api/http-client');
 const { AudioProcessor } = window.require('../shared/audio/processor');
 const { WebexAPI } = window.require('../shared/api/webex-api');
-const { JWTGenerator } = window.require('../shared/webex/jwt');
-const { generateUUID, createElectronLogger, showStatus, testBackend } = window.require('../shared/utils');
+// JWT no longer needed - using bot token
+const { createElectronLogger, showStatus, testBackend } = window.require('../shared/utils');
 
 // ============================================================================
 // GLOBAL VARIABLES
@@ -32,7 +32,7 @@ window.addLog = addLog;
 // Initialize components (after logger is available)
 const backendClient = new BackendClient();
 const webexAPI = new WebexAPI();
-const jwtGenerator = new JWTGenerator(config);
+// No longer need JWT generator - using bot token
 
 // ============================================================================
 // INITIALIZATION
@@ -54,8 +54,11 @@ async function initializeWebexSDK() {
     try {
         addLog('🔧 Initializing Webex SDK...', 'info');
         
-        // Initialize Webex SDK directly
+        // Initialize Webex SDK with bot access token (official method)
         webex = window.Webex.init({
+            credentials: {
+                access_token: config.webex.botAccessToken
+            },
             config: {
                 logger: {
                     level: 'info'
@@ -65,23 +68,29 @@ async function initializeWebexSDK() {
                 }
             }
         });
+
+        addLog('✅ Webex SDK initialized with bot access token', 'success');
         
-        addLog('✅ Webex SDK instance created with enhanced logging', 'success');
-        
-        // Generate JWT using shared component
-        const jwtToken = jwtGenerator.buildJWT();
-        
-        // Authenticate using JWT
-        addLog('🔐 Authenticating with JWT...', 'info');
-        await webex.authorization.requestAccessTokenFromJwt({
-            jwt: jwtToken
-        });
-        addLog('🔐 SDK authorization successful', 'success');
-        
-        // Register device
-        addLog('📱 Registering device...', 'info');
-        await webex.meetings.register();
+        // Validate bot authentication before registering for meetings
+        addLog('🔐 Validating bot authentication...', 'info');
+        try {
+            const botInfo = await webex.people.get('me');
+            addLog(`✅ Bot authenticated: ${botInfo.displayName}`, 'success');
+            
+            // Register with Webex Cloud
+            addLog('📱 Registering with Webex Cloud...', 'info');
+            webex.meetings.register()
+              .then(() => {
         addLog('📱 Device registered successfully', 'success');
+              })
+              .catch((err) => {
+                console.error('Registration error:', err);
+                addLog(`❌ Device registration failed: ${err.message}`, 'error');
+              });
+        } catch (err) {
+            addLog(`❌ Bot authentication failed: ${err.message}`, 'error');
+            throw err;
+        }
         
         addLog('✅ Webex SDK initialized successfully', 'success');
         
@@ -119,10 +128,10 @@ async function joinMeeting() {
         addLog('🚀 Joining meeting...', 'info');
         showStatus('Joining meeting...', 'info');
         
-        // Generate meeting ID
-        meetingId = generateUUID();
+        // Use meeting URL as session ID
+        meetingId = meetingUrl;
         addLog('📋 Meeting session started', 'info');
-
+        
         // Create meeting object directly
         currentMeeting = await webex.meetings.create(meetingUrl);
         addLog('✅ Meeting object created', 'success');
@@ -171,10 +180,11 @@ function setupMeetingEventListeners() {
         }
     });
     
-    // Media stopped event
+    // Handle media streams stopping (following official docs pattern)
     currentMeeting.on('media:stopped', (media) => {
         addLog(`🔇 Meeting media stopped: ${media.type}`, 'info');
         
+        // Clean up media elements (like in the docs)
         if (media.type === 'remoteAudio') {
             handleMediaCleanup();
         } else if (media.type === 'remoteVideo') {
@@ -198,10 +208,17 @@ function setupMeetingEventListeners() {
         }
     });
     
-    // Meeting lifecycle events
-    currentMeeting.on('meeting:left', () => handleMeetingEnd('meeting:left'));
-    currentMeeting.on('meeting:ended', () => handleMeetingEnd('meeting:ended'));
-    currentMeeting.on('meeting:inactive', () => handleMeetingEnd('meeting:inactive'));
+    // Meeting end events - only trigger if host ends meeting (not when we leave manually)
+    currentMeeting.on('meeting:ended', () => {
+        addLog('🏁 Meeting ended by host', 'info');
+        handleMeetingEnd('meeting:ended');
+    });
+    
+    currentMeeting.on('meeting:inactive', () => {
+        addLog('💤 Meeting became inactive', 'info');  
+        handleMeetingEnd('meeting:inactive');
+    });
+
     
     // Audio mute events for debugging
     currentMeeting.on('media:remoteAudioMuted', () => {
@@ -359,12 +376,7 @@ function handleMediaCleanup() {
         addLog('✅ Meeting audio context cleaned up', 'success');
     }
     
-    // Stop audio processor
-    if (audioProcessor) {
-        audioProcessor.stop();
-        audioProcessor = null;
-        addLog('✅ Audio processor stopped', 'success');
-    }
+    // Note: Audio processor cleanup is handled by handleMeetingEnd()
 }
 
 // ============================================================================
@@ -372,7 +384,7 @@ function handleMediaCleanup() {
 // ============================================================================
 
 async function handleMeetingEnd(eventType) {
-    addLog(`🔚 Meeting ended (${eventType})`, 'info');
+    addLog(`🔚 Meeting ended (${eventType}) - Closing app to prevent hanging browser in GCP`, 'warn');
     
     // Stop audio processing
         if (audioProcessor) {
@@ -381,16 +393,15 @@ async function handleMeetingEnd(eventType) {
         addLog('✅ Audio processing stopped', 'success');
     }
     
-    // Reset state
-    isInMeeting = false;
-    meetingId = null;
-    hostEmail = null;
-    currentMeeting = null;
-    
-    // Update UI
-    document.getElementById('joinBtn').disabled = false;
-    document.getElementById('leaveBtn').disabled = true;
-    showStatus('Meeting ended', 'info');
+    // Close Electron app immediately (critical for GCP deployment)
+    addLog('👋 Closing Electron app now...', 'info');
+    const { remote } = window.require('electron');
+    if (remote && remote.app) {
+        remote.app.quit();
+    } else {
+        // Fallback: close window
+        window.close();
+    }
 }
 
 async function leaveMeeting() {
@@ -398,27 +409,19 @@ async function leaveMeeting() {
         addLog('👋 Leaving meeting...', 'info');
         showStatus('Leaving meeting...', 'info');
         
-        // Stop audio processing first
-        if (audioProcessor) {
-            addLog('🛑 Stopping audio processing...', 'info');
-            audioProcessor.stop();
-            audioProcessor = null;
-            addLog('✅ Audio processing stopped', 'success');
-        }
-        
-        // Leave meeting
+        // Simple approach following official docs - just leave and close app
         if (currentMeeting) {
             await currentMeeting.leave();
             addLog('✅ Meeting left successfully', 'success');
         }
         
-        // Clean up
-        cleanupMeeting();
+        // Close app immediately after leaving (following docs pattern)
+        handleMeetingEnd('manual-leave');
         
     } catch (error) {
         addLog(`❌ Error leaving meeting: ${error.message}`, 'error');
-        // Force cleanup even if leave fails
-        cleanupMeeting();
+        // Force cleanup and app closure even if leave fails
+        handleMeetingEnd('leave-error');
     }
 }
 

@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { generateUUID, analyzeAudioChunk } = require('../utils');
+const { analyzeAudioChunk } = require('../utils');
 
 const { config } = require('../config');
 
@@ -24,6 +24,25 @@ class AudioProcessor {
   }
 
   /**
+   * Initialize chunk count from backend (continue sequence from last chunk)
+   */
+  async initializeChunkCount() {
+    if (this.backendClient && this.meetingId) {
+      try {
+        const maxChunkId = await this.backendClient.getMeetingChunkCount(this.meetingId);
+        this.chunkCount = maxChunkId;
+        console.log(`🔄 Initialized chunk count: ${this.chunkCount} (continuing from last chunk)`);
+      } catch (error) {
+        console.log(`⚠️ Failed to get chunk count, starting from 0:`, error.message);
+        this.chunkCount = 0;
+      }
+    } else {
+      console.log(`⚠️ No backend client or meeting ID, starting from 0`);
+      this.chunkCount = 0;
+    }
+  }
+
+  /**
    * Start processing audio stream (for GUI mode with MediaStream)
    */
   async startProcessing(mediaStream) {
@@ -31,6 +50,9 @@ class AudioProcessor {
       console.log('⚠️ Audio processing already started');
       return;
     }
+
+    // Initialize chunk count from backend first
+    await this.initializeChunkCount();
 
     try {
       this.isProcessing = true;
@@ -420,7 +442,7 @@ class AudioProcessor {
         if (audioChunk && audioChunk.length > 0) {
           try {
             this.chunkCount++;
-            const chunkId = generateUUID();
+            const chunkId = this.chunkCount;
             
             console.log(`🔄 Processing documentation-compliant audio chunk #${this.chunkCount}`);
             console.log(`📊 Buffer: ${audioChunk.length} samples, Duration: ~${config.audio.chunkDurationMs/1000}s`);
@@ -480,7 +502,7 @@ class AudioProcessor {
 
     try {
       this.chunkCount++;
-      const chunkId = generateUUID();
+      const chunkId = this.chunkCount;
       
       console.log(`🔄 PROCESSING CHUNK ${this.chunkCount} - ID: ${chunkId}`);
       console.log(`   Buffer Length: ${this.chunkBuffer.length} frames`);

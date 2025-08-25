@@ -48,6 +48,28 @@ class BackendClient {
   }
 
   /**
+   * Get the maximum chunk_id for a meeting to continue sequence
+   */
+  async getMeetingChunkCount(meetingId) {
+    try {
+      const response = await axios.get(`${this.baseURL}/audio/chunks/count?meeting_id=${encodeURIComponent(meetingId)}`, {
+        headers: {
+          'Authorization': `Bearer ${this.token}`
+        }
+      });
+      
+      const maxChunkId = response.data.max_chunk_id;
+      console.log(`📊 Meeting chunk count - Meeting: ${meetingId}, Max chunk ID: ${maxChunkId}`);
+      return maxChunkId;
+      
+    } catch (error) {
+      console.error(`❌ Failed to get chunk count for meeting ${meetingId}:`, error.response?.data || error.message);
+      // Return 0 if there's an error (start from 1)
+      return 0;
+    }
+  }
+
+  /**
    * Test connection to backend
    */
   async testConnection() {
