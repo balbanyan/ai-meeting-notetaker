@@ -1,5 +1,5 @@
 {
-  "name": "ai-notetaker-bot-runner-v2",
+  "name": "ai-notetaker-bot-runner",
   "version": "2.0.0",
   "description": "Unified bot runner - supports both GUI and headless modes",
   "main": "src/index.js",

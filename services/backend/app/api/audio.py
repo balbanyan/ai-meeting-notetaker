@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
@@ -12,8 +12,8 @@ router = APIRouter()
 class AudioChunkResponse(BaseModel):
     id: str  # UUID now
     meeting_id: str
-    chunk_id: int  # Sequential number now
-    transcription_status: str  # "ready", "processed", "failed"
+    chunk_id: int  # Sequential chunk number
+    transcription_status: str  # "ready", "processing", "completed", "failed"
     host_email: str = None
     created_at: str
     updated_at: str
@@ -30,6 +30,7 @@ class SaveChunkResponse(BaseModel):
 
 @router.post("/audio/chunk", response_model=SaveChunkResponse)
 async def save_audio_chunk(
+    background_tasks: BackgroundTasks,
     meeting_id: str = Form(...),
     chunk_id: int = Form(...),
     host_email: str = Form(None),
@@ -58,6 +59,11 @@ async def save_audio_chunk(
         # Get chunk count for this meeting
         chunk_count = db.query(AudioChunk).filter(AudioChunk.meeting_id == meeting_id).count()
         print(f"💾 CHUNK SAVED - Chunk #{chunk_count}, ID: {chunk_id}, Size: {len(audio_data)} bytes")
+        
+        # Trigger background transcription (Immediate Processing)
+        from app.services.transcription import transcribe_chunk_async
+        background_tasks.add_task(transcribe_chunk_async, str(chunk.id))
+        print(f"🔄 TRANSCRIPTION QUEUED - Chunk UUID: {chunk.id}")
         
         return SaveChunkResponse(
             status="saved",

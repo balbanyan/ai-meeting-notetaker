@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# AI Meeting Notetaker V2 - Startup Script
+# AI Meeting Notetaker - Startup Script
 
-echo "🚀 Starting AI Meeting Notetaker V2..."
+echo "🚀 Starting AI Meeting Notetaker..."
 
 # Parse command line arguments
 MODE=""
@@ -52,7 +52,7 @@ done
 
 # Check if we're in the right directory
 if [ ! -f "start.sh" ]; then
-    echo "❌ Please run this script from the ai-meeting-notetaker-v2 directory"
+    echo "❌ Please run this script from the ai-meeting-notetaker directory"
     exit 1
 fi
 

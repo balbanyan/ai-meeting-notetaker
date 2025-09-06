@@ -23,8 +23,7 @@ class JoinMeetingResponse(BaseModel):
 async def join_meeting(request: JoinMeetingRequest):
     """Trigger bot to join a meeting via headless bot-runner"""
     try:
-        print(f"🚀 JOIN REQUEST - Meeting URL: {request.meeting_url}")
-        print(f"   Host Name: {request.host_name}")
+        print(f"🚀 JOIN REQUEST received")
         
         # Call the headless bot-runner API
         bot_runner_url = f"{settings.bot_runner_url}/join"
@@ -42,7 +41,7 @@ async def join_meeting(request: JoinMeetingRequest):
                 if bot_response.get("success"):
                     meeting_id = bot_response.get("meetingId", request.meeting_url)
                     
-                    print(f"✅ Bot successfully joined meeting: {meeting_id}")
+                    print(f"✅ Bot successfully joined meeting")
                     
                     return JoinMeetingResponse(
                         meeting_id=meeting_id,

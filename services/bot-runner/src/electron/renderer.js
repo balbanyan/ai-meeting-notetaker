@@ -1,5 +1,5 @@
 /**
- * Electron Renderer for AI Meeting Notetaker V2
+ * Electron Renderer for AI Meeting Notetaker
  * Uses shared API, processor, config, and JWT components
  * Implements Webex logic directly for optimal performance
  */
@@ -39,8 +39,8 @@ const webexAPI = new WebexAPI();
 // ============================================================================
 
 window.addEventListener('DOMContentLoaded', () => {
-    addLog('🚀 Bot Runner V2 starting...', 'info');
-    showStatus('Bot Runner V2 ready - Enter meeting details above', 'info');
+    addLog('🚀 Bot Runner starting...', 'info');
+    showStatus('Bot Runner ready - Enter meeting details above', 'info');
     
     // Initialize Webex SDK
     initializeWebexSDK();

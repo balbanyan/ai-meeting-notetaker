@@ -12,7 +12,7 @@ class AudioChunk(Base):
     chunk_id = Column(Integer, nullable=False, index=True)         # Sequential chunk number per meeting  
     chunk_audio = Column(LargeBinary, nullable=True)               # Binary audio data
     chunk_transcript = Column(String, nullable=True)               # Transcript text
-    transcription_status = Column(String(20), default="ready")    # Transcription status: ready, processed, failed
+    transcription_status = Column(String(20), default="ready")    # Transcription status: ready, processing, completed, failed
     host_email = Column(String(255), nullable=True)               # Meeting host email
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

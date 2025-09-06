@@ -14,7 +14,7 @@ class BotRunnerApp {
     try {
       // Validate configuration
       validateConfig();
-      console.log('✅ Bot Runner V2 initialized');
+      console.log('✅ Bot Runner initialized');
       
       // Set up Electron app events
       this.setupAppEvents();

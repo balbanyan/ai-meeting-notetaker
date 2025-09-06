@@ -1,42 +1,57 @@
-# AI Meeting Notetaker V2
+# AI Meeting Notetaker
 
 An AI-powered meeting notetaker for Webex meetings that automatically captures and processes meeting audio with both GUI and headless operation modes. Designed for production deployment on GCP with automatic browser cleanup.
 
 ## 🚀 Features
 
-- **Dual Mode Operation**: GUI (Electron) and Headless (Puppeteer) bot modes
-- **Webex Bot Integration**: Direct authentication using Webex Developer Bot access tokens
-- **Real-time Audio Capture**: High-quality audio recording in 10-second chunks
-- **PostgreSQL Storage**: Persistent storage with optimized database schema and timestamps
-- **Auto Browser Cleanup**: Prevents hanging browsers in production
-- **Host Detection**: Automatically identifies and stores meeting host information
-- **Modern Architecture**: Clean separation of concerns with shared utilities
+- **Automated Meeting Participation**: Joins Webex meetings and captures audio automatically
+- **Real-time Audio Processing**: Records and processes meeting audio in structured chunks
+- **AI-Powered Transcription**: Converts speech to text using advanced Whisper models
+- **Flexible Deployment**: Supports both GUI development mode and headless production deployment
+- **Persistent Data Storage**: Stores audio chunks and transcripts with meeting metadata
+- **Production Ready**: Auto-cleanup, error handling, and scalable architecture
 
 ## 🏗️ Architecture
 
 ### Services
 - **Backend** (`services/backend`): FastAPI + PostgreSQL for API endpoints and data storage
+  - Audio chunk storage and retrieval
+  - Groq Whisper transcription service integration
+  - Meeting management API
 - **Bot-runner** (`services/bot-runner`): Dual-mode bot with Electron GUI and Puppeteer headless
+  - Real-time audio capture from Webex meetings
+  - Sequential chunk processing with backend integration
 
 ### Bot Runner Modes
 - **GUI Mode**: Electron app with visual interface for development and testing
 - **Headless Mode**: Puppeteer automation for production deployment
+
+### Transcription Service
+- **Groq Whisper API**: Automatic speech-to-text transcription
+- **Background Processing**: Asynchronous transcription of audio chunks
+- **Multi-language Support**: Auto-detection enabled
 
 ## 🛠️ Technology Stack
 
 **Backend:**
 - FastAPI, SQLAlchemy, PostgreSQL, Pydantic
 - RESTful API with health checks and audio chunk endpoints
+- Groq Whisper API integration for transcription
 
 **Bot Runner:**
 - **GUI**: Electron + Webex Browser SDK + Web Audio API
 - **Headless**: Puppeteer + Webex Browser SDK + Audio capture
-- **Shared**: JWT authentication, audio processing, backend communication
+- **Shared**: Bot token authentication, audio processing, backend communication
 
 **Audio Processing:**
 - Official Webex SDK audio capture patterns
-- 48kHz sample rate with 10-second chunking
+- 16kHz sample rate with 10-second chunking
 - WAV format conversion and analysis
+
+**Transcription:**
+- Groq Whisper large-v3 model
+- Background processing with FastAPI BackgroundTasks
+- Automatic language detection
 
 ## 📋 Prerequisites
 
@@ -44,16 +59,17 @@ An AI-powered meeting notetaker for Webex meetings that automatically captures a
 - **Python** 3.11+
 - **PostgreSQL** running on localhost:5432
 - **Webex Developer Bot** with access token
+- **Groq API Key** for transcription
 
 ## ⚡ Quick Start
 
 ### 1. Database Setup
 ```bash
 # Create database
-createdb ai_notetaker_v2
+createdb ai_notetaker
 
 # Or using psql
-psql -U postgres -c "CREATE DATABASE ai_notetaker_v2;"
+psql -U postgres -c "CREATE DATABASE ai_notetaker;"
 ```
 
 ### 2. Environment Configuration
@@ -75,7 +91,7 @@ cd ../backend
 cp .env.example .env
 
 # Edit .env with your credentials:
-# - DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/ai_notetaker_v2
+# - DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/ai_notetaker
 # - BOT_SERVICE_TOKEN=your_secure_token
 # - BOT_RUNNER_URL=http://localhost:3001
 ```
@@ -100,13 +116,13 @@ cd ../..
 **Option A: Quick Start Script**
 ```bash
 # Start backend only
-./start.sh backend
+./start.sh --backend
 
 # Start GUI mode bot and backed
-./start.sh gui
+./start.sh --gui
 
 # Start headless mode bot and backend
-./start.sh headless
+./start.sh --headless
 
 # Start all services
 ./start.sh
@@ -183,7 +199,7 @@ curl -X POST http://localhost:8000/meetings/join \
 - `chunk_id` (Integer) - Sequential chunk number (1, 2, 3...)
 - `chunk_audio` (BYTEA) - WAV audio data
 - `chunk_transcript` (String) - Transcript text (optional)
-- `transcription_status` (String) - Status: 'ready', 'processed', 'failed'
+- `transcription_status` (String) - Status: 'ready', 'processing', 'completed', 'failed'
 - `host_email` (String) - Meeting host email
 - `created_at` (Timestamp) - When chunk was created
 - `updated_at` (Timestamp) - When chunk was last modified
@@ -213,94 +229,44 @@ BOT_MODE=gui  # or 'headless'
 **Backend (.env):**
 ```bash
 # Database Configuration
-DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/ai_notetaker_v2
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/ai_notetaker
 
 # Authentication
 BOT_SERVICE_TOKEN=your_secure_backend_auth_token
 
 # Bot Runner Communication
 BOT_RUNNER_URL=http://localhost:3001
+
+# Transcription Configuration
+WHISPER_GROQ_API=your_groq_api_key_here
+WHISPER_MODEL=whisper-large-v3
+GROQ_API_BASE_URL=https://api.groq.com/openai/v1
 ```
 
 ### Audio Configuration
-- **Sample Rate**: 48kHz (optimal for Webex)
+- **Sample Rate**: 16kHz (optimal for transcription)
 - **Chunk Duration**: 10 seconds
 - **Format**: WAV (uncompressed)
 - **Channels**: Mono
 
-## 🚀 Deployment
-
-### GCP Production Setup
-1. **Environment**: Set `BOT_MODE=headless`
-2. **Resources**: Configure adequate CPU/memory for concurrent meetings
-3. **Database**: Use Cloud SQL PostgreSQL
-4. **Secrets**: Store bot tokens in Google Secret Manager
-5. **Auto-scaling**: Configure based on meeting load
-6. **Monitoring**: Set up health checks and logging
-
-**Key GCP Considerations:**
-- **Browser Cleanup**: Auto-closes browsers when meetings end (prevents hanging)
-- **Multi-Meeting**: Single instance handles multiple concurrent meetings  
-- **Resource Limits**: Set memory/CPU limits to prevent runaway processes
-- **Health Checks**: Monitor `/health` and `/status` endpoints
-
-### Docker Support
-```bash
-# Build and run with Docker Compose
-docker-compose up -d
-
-# For production with resource limits
-docker run -m 2g --cpus="1.5" ai-meeting-notetaker-v2
-```
-
-## 🐛 Troubleshooting
-
-**Common Issues:**
-
-1. **"Device not registered" error**
-   - Ensure bot token has meeting permissions
-   - Verify using `webex.meetings.register()` not `webex.internal.device.register()`
-
-2. **Empty audio chunks**
-   - Verify using official Webex SDK audio capture pattern
-   - Check microphone permissions in browser/Electron
-   - Ensure bot token is valid and not expired
-
-3. **Bot authentication failed**
-   - Verify `WEBEX_BOT_ACCESS_TOKEN` is correct
-   - Ensure bot has proper scopes for meetings
-   - Test bot token with `webex.people.get('me')`
-
-4. **Database connection failed**
-   - Ensure PostgreSQL is running on port 5432
-   - Verify database name and credentials
-   - Run migration if `updated_at` column missing
-
-5. **Browser not closing after meeting**
-   - Check media event handling in logs
-   - Verify `media:stopped` events are firing
-   - Monitor browser cleanup logs
-
-6. **Chunk ID sequence issues**
-   - Check if database schema updated to integer `chunk_id`
-   - Verify chunk count API endpoint working
-   - Clear old UUID-based chunks if migrating
-
-## 📝 Development
 
 ### Project Structure
 ```
-ai-meeting-notetaker-v2/
+ai-meeting-notetaker/
 ├── services/
 │   ├── backend/          # FastAPI backend
-│   │   ├── app/          # Application modules
+│   │   ├── app/
+│   │   │   ├── api/      # API endpoints (audio, meetings, health)
+│   │   │   ├── core/     # Config, database, auth
+│   │   │   ├── models/   # SQLAlchemy models
+│   │   │   └── services/ # Transcription service (Groq Whisper)
 │   │   ├── main.py       # Entry point
 │   │   └── requirements.txt
 │   └── bot-runner/       # Dual-mode bot
 │       ├── src/
 │       │   ├── electron/ # GUI mode (Electron)
 │       │   ├── headless/ # Headless mode (Puppeteer)
-│       │   └── shared/   # Shared utilities
+│       │   └── shared/   # Shared utilities (audio, config, API)
 │       └── package.json
 ├── .env.example          # Environment template
 ├── start.sh              # Quick start script
@@ -310,21 +276,10 @@ ai-meeting-notetaker-v2/
 ### Key Files
 - `services/bot-runner/src/electron/renderer.js` - Main Electron renderer with auto-close
 - `services/bot-runner/src/headless/webex-client.js` - Main headless client with browser cleanup
-- `services/bot-runner/src/shared/webex/jwt.js` - JWT utilities (legacy, for bot tokens now)
 - `services/bot-runner/src/shared/audio/processor.js` - Audio processing with sequential IDs
 - `services/backend/main.py` - Backend API entry point
 - `services/backend/app/api/meetings.py` - Meeting join API with bot-runner integration
+- `services/backend/app/services/transcription.py` - Groq Whisper transcription service
 
-## 📄 License
-
-MIT License - see LICENSE file for details.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test both GUI and headless modes
-5. Submit a pull request
 
 ---

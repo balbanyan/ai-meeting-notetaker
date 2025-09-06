@@ -110,10 +110,10 @@ class AudioProcessor {
   }
 
   /**
-   * Start processing for headless mode V2 (documentation-compliant with bridge)
+   * Start processing for headless mode (documentation-compliant with bridge)
    * Uses the actual meeting audio stream from PuppeteerWebexBridge
    */
-  async startHeadlessProcessingV2(page, bridge) {
+  async startHeadlessProcessing(page, bridge) {
     if (this.isProcessing) {
       console.log('⚠️ Audio processing already started');
       return;

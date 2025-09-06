@@ -12,7 +12,7 @@ from app.core.database import create_tables
 
 # Create FastAPI app
 app = FastAPI(
-    title="AI Meeting Notetaker V2",
+    title="AI Meeting Notetaker",
     description="Minimal MVP for meeting audio capture",
     version="2.0.0"
 )

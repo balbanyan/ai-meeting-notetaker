@@ -17,11 +17,11 @@ async def health_check(db: Session = Depends(get_db)):
         return {
             "status": "healthy",
             "database": db_status,
-            "version": "v2-mvp"
+            "version": "2.0-mvp"
         }
     except Exception as e:
         return {
             "status": "unhealthy",
             "error": str(e),
-            "version": "v2-mvp"
+            "version": "2.0-mvp"
         }
