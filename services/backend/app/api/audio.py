@@ -58,7 +58,17 @@ async def save_audio_chunk(
         
         # Get chunk count for this meeting
         chunk_count = db.query(AudioChunk).filter(AudioChunk.meeting_id == meeting_id).count()
-        print(f"💾 CHUNK SAVED - Chunk #{chunk_count}, ID: {chunk_id}, Size: {len(audio_data)} bytes")
+        
+        # Detect audio format from content type or file signature
+        format_info = ""
+        if audio_file.content_type:
+            format_info = f", Format: {audio_file.content_type}"
+        elif audio_data[:4] == b'\x1a\x45\xdf\xa3':  # WebM signature
+            format_info = ", Format: WebM/Opus"
+        elif audio_data[:4] == b'RIFF':  # WAV signature
+            format_info = ", Format: WAV"
+            
+        print(f"💾 CHUNK SAVED - Chunk #{chunk_count}, ID: {chunk_id}, Size: {len(audio_data)} bytes{format_info}")
         
         # Trigger background transcription (Immediate Processing)
         from app.services.transcription import transcribe_chunk_async

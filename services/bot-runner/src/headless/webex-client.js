@@ -8,7 +8,10 @@ const { BackendClient } = require('../shared/api/http-client');
 const { AudioProcessor } = require('../shared/audio/processor');
 const { config } = require('../shared/config');
 const { createLogger, testBackend } = require('../shared/utils');
-// JWT no longer needed - using bot token
+const ffmpeg = require('fluent-ffmpeg');
+const fs = require('fs').promises;
+const path = require('path');
+const os = require('os');
 
 class PuppeteerWebexClient {
   constructor(page) {
@@ -21,16 +24,8 @@ class PuppeteerWebexClient {
     this.backendClient = new BackendClient();
     this.audioProcessor = null; // Will be created when we have meeting details
     this.logger = createLogger('Headless');
-    // No longer need JWT generator - using bot token
   }
 
-  // ============================================================================
-  // BOT TOKEN AUTHENTICATION (replaces JWT)
-  // ============================================================================
-
-  // ============================================================================
-  // BACKEND CONNECTION TEST
-  // ============================================================================
 
   async testBackendConnection() {
     const success = await testBackend(this.backendClient, this.logger);
@@ -98,7 +93,6 @@ class PuppeteerWebexClient {
           console.log('📄 Browser environment ready');
           window.audioChunkReady = null;
           window.webexAudioStream = null;
-          window.meetingAudioContext = null;
         </script>
       </body>
       </html>
@@ -195,18 +189,13 @@ class PuppeteerWebexClient {
           console.log(`🎵 Meeting media ready: ${media.type}`);
           
           if (media.type === 'remoteAudio' && media.stream) {
-            console.log('🎧 Remote audio stream detected, using official SDK approach...');
+            console.log('🎧 Remote audio stream detected, using MediaRecorder approach...');
             
             // Store the audio stream globally
             window.webexAudioStream = media.stream;
             
-            // Create or recreate audio element (following working webex-client pattern)
+            // Create audio element for SDK compliance
             let remoteAudioElement = document.getElementById('remote-view-audio');
-            if (remoteAudioElement && remoteAudioElement._wasConnectedToSource) {
-              remoteAudioElement.remove();
-              remoteAudioElement = null;
-            }
-            
             if (!remoteAudioElement) {
               remoteAudioElement = document.createElement('audio');
               remoteAudioElement.id = 'remote-view-audio';
@@ -215,57 +204,108 @@ class PuppeteerWebexClient {
               document.body.appendChild(remoteAudioElement);
             }
 
-            // Assign stream for playback (documentation-compliant)
+            // Assign stream for SDK compliance and playback
             remoteAudioElement.srcObject = media.stream;
             
             remoteAudioElement.onloadedmetadata = async () => {
-              console.log('🎵 Audio element loaded, starting capture...');
+              console.log('🎵 Audio element loaded, starting MediaRecorder capture...');
               
               try {
-                // Setup audio contexts (following working webex-client patterns)
-                if (window.meetingAudioContext) {
-                  window.meetingAudioContext.close();
+                // Clean up any existing MediaRecorder
+                if (window.mediaRecorder && window.mediaRecorder.state !== 'inactive') {
+                  window.mediaRecorder.stop();
                 }
 
-                // Playback context
-                window.meetingAudioContext = new AudioContext();
-                const source = window.meetingAudioContext.createMediaElementSource(remoteAudioElement);
-                remoteAudioElement._wasConnectedToSource = true;
-                source.connect(window.meetingAudioContext.destination);
+                // Create MediaRecorder for clean audio capture
+                const mediaRecorder = new MediaRecorder(media.stream, {
+                  mimeType: 'audio/webm;codecs=opus',
+                  audioBitsPerSecond: 128000
+                });
 
-                // Capture context for processing
-                const captureContext = new AudioContext({ sampleRate: config.audio.sampleRate });
-                const streamSource = captureContext.createMediaStreamSource(media.stream);
-                const analyser = captureContext.createAnalyser();
-                analyser.fftSize = 2048;
-                
-                streamSource.connect(analyser);
-                
-                // Start audio chunk capture (following working webex-client pattern)
-                let audioBuffer = [];
-                const targetSamples = config.audio.sampleRate * (config.audio.chunkDurationMs / 1000);
-                
-                const captureInterval = setInterval(() => {
-                  const bufferLength = analyser.frequencyBinCount;
-                  const dataArray = new Float32Array(bufferLength);
-                  analyser.getFloatTimeDomainData(dataArray);
-                  
-                  audioBuffer.push(...dataArray);
-                  
-                  if (audioBuffer.length >= targetSamples) {
-                    const chunk = audioBuffer.slice(0, targetSamples);
-                    audioBuffer = audioBuffer.slice(targetSamples);
-                    window.audioChunkReady = chunk;
+                let webmChunks = [];
+                let chunkStartTime = Date.now();
+                let isRecording = true;
+
+                mediaRecorder.ondataavailable = async (event) => {
+                  if (event.data.size > 0) {
+                    console.log(`📦 MediaRecorder fragment received: ${event.data.size} bytes`);
+                    webmChunks.push(event.data);
                   }
-                }, 100);
+                };
+
+                mediaRecorder.onstop = async () => {
+                  console.log('🔇 MediaRecorder stopped, processing complete WebM...');
+                  
+                  if (webmChunks.length > 0) {
+                    try {
+                      // Combine all WebM fragments into complete file
+                      const completeWebM = new Blob(webmChunks, { type: 'audio/webm;codecs=opus' });
+                      const arrayBuffer = await completeWebM.arrayBuffer();
+                      const uint8Array = new Uint8Array(arrayBuffer);
+                      
+                      console.log(`✅ Complete WebM created: ${completeWebM.size} bytes from ${webmChunks.length} fragments`);
+                      
+                      // Store complete WebM for Node.js processing
+                      window.audioChunkReady = {
+                        data: Array.from(uint8Array),
+                        timestamp: chunkStartTime,
+                        format: 'webm',
+                        mimeType: completeWebM.type,
+                        size: completeWebM.size
+                      };
+                      
+                      // Reset for next chunk
+                      webmChunks = [];
+                      chunkStartTime = Date.now();
+                      
+                      // Restart recording if still active
+                      if (isRecording && window.mediaRecorder && window.mediaRecorder.state === 'inactive') {
+                        setTimeout(() => {
+                          if (isRecording) {
+                            console.log('🔄 Restarting MediaRecorder for next chunk...');
+                            window.mediaRecorder.start();
+                          }
+                        }, 100);
+                      }
+                      
+                    } catch (error) {
+                      console.error('❌ Failed to process complete WebM:', error);
+                    }
+                  }
+                };
+
+                mediaRecorder.onerror = (error) => {
+                  console.error('❌ MediaRecorder error:', error);
+                };
+
+                // Start recording and set up chunk timing
+                const chunkDurationMs = config.audio.chunkDurationMs;
+                mediaRecorder.start();
+                
+                // Stop and restart every chunkDurationMs to create complete WebM files
+                const chunkInterval = setInterval(() => {
+                  if (isRecording && mediaRecorder.state === 'recording') {
+                    console.log(`⏱️ Creating ${chunkDurationMs/1000}s WebM chunk...`);
+                    mediaRecorder.stop();
+                  }
+                }, chunkDurationMs);
+                
+                // Clean up function
+                window.stopMediaRecorder = () => {
+                  isRecording = false;
+                  clearInterval(chunkInterval);
+                  if (mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                  }
+                };
                 
                 // Store references for cleanup
-                window.audioInterval = captureInterval;
-                window.captureContext = captureContext;
-                console.log('✅ Audio capture started successfully');
+                window.mediaRecorder = mediaRecorder;
+                
+                console.log(`✅ MediaRecorder started - capturing ${chunkDurationMs/1000}s chunks`);
                 
               } catch (error) {
-                console.error('❌ Failed to set up audio capture:', error);
+                console.error('❌ Failed to set up MediaRecorder:', error);
               }
             };
           }
@@ -275,24 +315,25 @@ class PuppeteerWebexClient {
           console.log(`🔇 Meeting media stopped: ${media.type}`);
           if (media.type === 'remoteAudio') {
             window.webexAudioStream = null;
-            if (window.audioInterval) {
-              clearInterval(window.audioInterval);
-              window.audioInterval = null;
+            
+            // Stop and clean up MediaRecorder
+            if (window.stopMediaRecorder) {
+              window.stopMediaRecorder();
+              window.stopMediaRecorder = null;
             }
-            if (window.meetingAudioContext) {
-              window.meetingAudioContext.close();
-              window.meetingAudioContext = null;
+            if (window.mediaRecorder) {
+              window.mediaRecorder = null;
             }
-            if (window.captureContext) {
-              window.captureContext.close();
-              window.captureContext = null;
-            }
+            
             // Clean up audio element
             const remoteAudioElement = document.getElementById('remote-view-audio');
             if (remoteAudioElement) {
               remoteAudioElement.srcObject = null;
               remoteAudioElement.remove();
             }
+            
+            // Clear chunk data
+            window.audioChunkReady = null;
           }
         });
 
@@ -313,6 +354,7 @@ class PuppeteerWebexClient {
         let mediaStreamCount = 0;
         let stoppedStreamCount = 0;
         
+        // Count media streams for meeting end detection
         meeting.on('media:ready', (media) => {
           mediaStreamCount++;
           console.log(`🎵 Media ready: ${media.type} (total: ${mediaStreamCount})`);
@@ -321,15 +363,6 @@ class PuppeteerWebexClient {
         meeting.on('media:stopped', (media) => {
           stoppedStreamCount++;
           console.log(`🔇 Media stopped: ${media.type} (stopped: ${stoppedStreamCount}/${mediaStreamCount})`);
-          
-          // Clean up media elements (following docs)
-          if (media.type === 'remoteAudio') {
-            let remoteAudioElement = document.getElementById('remote-view-audio');
-            if (remoteAudioElement) {
-              remoteAudioElement.srcObject = null;
-              remoteAudioElement.remove();
-            }
-          }
           
           // If all media streams stopped, likely meeting ended
           if (stoppedStreamCount >= mediaStreamCount && mediaStreamCount > 0) {
@@ -439,17 +472,17 @@ class PuppeteerWebexClient {
 
       try {
         const audioChunk = await this.page.evaluate(() => {
-          if (window.audioChunkReady && window.audioChunkReady.length > 0) {
+          if (window.audioChunkReady && window.audioChunkReady.data) {
             const chunk = window.audioChunkReady;
             window.audioChunkReady = null;
-            return Array.from(chunk);
+            return chunk;
           }
           return null;
         });
 
-        if (audioChunk && audioChunk.length > 0) {
-          // Process through shared audio processor
-          await this.processAudioChunk(audioChunk);
+        if (audioChunk && audioChunk.data && audioChunk.data.length > 0) {
+          // Process WebM chunk from MediaRecorder
+          await this.processMediaRecorderChunk(audioChunk);
         }
       } catch (error) {
         this.logger(`❌ Audio processing error: ${error.message}`, 'error');
@@ -460,23 +493,76 @@ class PuppeteerWebexClient {
     this.logger('✅ Audio processing loop started', 'success');
   }
 
-  async processAudioChunk(audioChunk) {
+  async processMediaRecorderChunk(audioChunk) {
     this.audioProcessor.chunkCount++;
     const chunkId = this.audioProcessor.chunkCount;
     
-    // Use shared audio processor for processing
-    this.logger(`🔄 Processing audio chunk #${chunkId}`, 'info');
-    this.logger(`📊 Buffer: ${audioChunk.length} samples, Duration: ~${config.audio.chunkDurationMs/1000}s`, 'info');
-    
-    // Use shared audio processor for conversion and sending
-    const bufferArray = new Float32Array(audioChunk);
-    const audioData = this.audioProcessor.convertToWAV([bufferArray]);
+    // Process MediaRecorder WebM chunk
+    this.logger(`🔄 Processing MediaRecorder chunk #${chunkId}`, 'info');
+    this.logger(`📊 WebM chunk: ${audioChunk.size} bytes, Format: ${audioChunk.format}, MIME: ${audioChunk.mimeType}`, 'info');
     
     try {
-      await this.backendClient.sendAudioChunk(this.meetingId, chunkId, audioData, this.hostEmail);
-      this.logger(`✅ Audio chunk sent successfully - Status: saved`, 'success');
+      // Convert array back to Buffer
+      const webmBuffer = Buffer.from(audioChunk.data);
+      
+      // Convert WebM to WAV using ffmpeg
+      this.logger(`🔄 Converting WebM to WAV...`, 'info');
+      const wavBuffer = await this.convertWebmToWav(webmBuffer);
+      this.logger(`✅ Conversion complete: ${webmBuffer.length} bytes WebM → ${wavBuffer.length} bytes WAV`, 'success');
+      
+      // Send WAV chunk to backend
+      await this.backendClient.sendAudioChunk(this.meetingId, chunkId, wavBuffer, this.hostEmail);
+      this.logger(`✅ WAV chunk sent successfully - Status: saved`, 'success');
     } catch (error) {
-      this.logger(`❌ Failed to send audio chunk: ${error.message}`, 'error');
+      this.logger(`❌ Failed to process MediaRecorder chunk: ${error.message}`, 'error');
+    }
+  }
+
+  /**
+   * Convert WebM buffer to WAV using ffmpeg (using temp files for reliability)
+   */
+  async convertWebmToWav(webmBuffer) {
+    const tempDir = os.tmpdir();
+    const inputFile = path.join(tempDir, `webm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.webm`);
+    const outputFile = path.join(tempDir, `wav_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.wav`);
+    
+    try {
+      // Write WebM buffer to temporary file
+      await fs.writeFile(inputFile, webmBuffer);
+      
+      // Convert using ffmpeg with file paths (more reliable than streams)
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputFile)
+          .audioCodec('pcm_s16le')  // 16-bit PCM
+          .audioChannels(1)        // Mono
+          .audioFrequency(16000)   // 16kHz sample rate
+          .format('wav')
+          .output(outputFile)
+          .on('error', (err) => {
+            this.logger(`❌ FFmpeg conversion error: ${err.message}`, 'error');
+            reject(new Error(`FFmpeg conversion failed: ${err.message}`));
+          })
+          .on('end', () => {
+            this.logger(`🎵 FFmpeg conversion completed: ${inputFile} → ${outputFile}`, 'info');
+            resolve();
+          })
+          .run();
+      });
+      
+      // Read the converted WAV file
+      const wavBuffer = await fs.readFile(outputFile);
+      
+      // Clean up temporary files
+      await fs.unlink(inputFile).catch(() => {}); // Ignore cleanup errors
+      await fs.unlink(outputFile).catch(() => {});
+      
+      return wavBuffer;
+      
+    } catch (error) {
+      // Clean up on error
+      await fs.unlink(inputFile).catch(() => {});
+      await fs.unlink(outputFile).catch(() => {});
+      throw error;
     }
   }
 
@@ -491,24 +577,23 @@ class PuppeteerWebexClient {
 
     try {
       await this.page.evaluate(() => {
-        if (window.audioInterval) {
-          clearInterval(window.audioInterval);
-          window.audioInterval = null;
+        // Stop and clean up MediaRecorder
+        if (window.stopMediaRecorder) {
+          window.stopMediaRecorder();
+          window.stopMediaRecorder = null;
         }
-        if (window.meetingAudioContext) {
-          window.meetingAudioContext.close();
-          window.meetingAudioContext = null;
+        if (window.mediaRecorder) {
+          window.mediaRecorder = null;
         }
-        if (window.captureContext) {
-          window.captureContext.close();
-          window.captureContext = null;
-        }
+        
         // Clean up audio element
         const remoteAudioElement = document.getElementById('remote-view-audio');
         if (remoteAudioElement) {
           remoteAudioElement.srcObject = null;
           remoteAudioElement.remove();
         }
+        
+        // Clear global variables
         window.webexAudioStream = null;
         window.audioChunkReady = null;
       });
