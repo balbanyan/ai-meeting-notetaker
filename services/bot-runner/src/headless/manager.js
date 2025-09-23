@@ -1,6 +1,7 @@
 const puppeteer = require('puppeteer');
 const { config, validateConfig } = require('../shared/config');
 const { PuppeteerWebexClient } = require('./webex-client');
+const { MultistreamWebexClient } = require('./webex-client-multistream');
 
 /**
  * Headless Runner Manager
@@ -11,6 +12,10 @@ class HeadlessRunner {
     this.browser = null;
     this.activeMeetings = new Map();
     this.isRunning = false;
+    
+    // Multistream configuration
+    this.enableMultistream = process.env.ENABLE_MULTISTREAM === 'true' || false;
+    console.log(`🎛️ Multistream mode: ${this.enableMultistream ? 'ENABLED' : 'DISABLED'}`);
   }
 
   /**
@@ -81,15 +86,16 @@ class HeadlessRunner {
       res.json({ 
         status: 'ok', 
         mode: 'headless',
+        multistreamEnabled: this.enableMultistream,
         activeMeetings: this.activeMeetings.size,
         browserConnected: !!this.browser && this.browser.isConnected()
       });
     });
     
-    // Join meeting endpoint - now with real Webex functionality
+    // Join meeting endpoint - supports both legacy and multistream
     app.post('/join', async (req, res) => {
       try {
-        const { meetingUrl, hostEmail } = req.body;
+        const { meetingUrl, hostEmail, enableMultistream } = req.body;
         
         if (!meetingUrl) {
           return res.status(400).json({ 
@@ -98,7 +104,11 @@ class HeadlessRunner {
           });
         }
         
-        console.log(`📞 Join meeting request received`);
+        // Determine which client to use
+        const useMultistream = enableMultistream !== undefined ? enableMultistream : this.enableMultistream;
+        const clientType = useMultistream ? 'multistream' : 'legacy';
+        
+        console.log(`📞 Join meeting request received (${clientType} mode)`);
         
         // Create new page for this meeting
         const page = await this.browser.newPage();
@@ -114,8 +124,12 @@ class HeadlessRunner {
           console.log('⚠️ Permission grant failed (will rely on browser flags):', permError.message);
         }
         
-        // Create Webex client for this page
-        const webexClient = new PuppeteerWebexClient(page);
+        // Create appropriate Webex client for this page
+        const webexClient = useMultistream ? 
+          new MultistreamWebexClient(page) : 
+          new PuppeteerWebexClient(page);
+          
+        console.log(`🎯 Using ${clientType} Webex client`);
         
         // Join the meeting
         const result = await webexClient.joinMeeting(meetingUrl);
@@ -126,6 +140,7 @@ class HeadlessRunner {
           page, 
           webexClient, 
           meetingUrl,
+          clientType,
           startTime: new Date().toISOString()
         });
         
@@ -135,7 +150,8 @@ class HeadlessRunner {
           success: true, 
           meetingId,
           hostEmail: result.hostEmail,
-          message: 'Meeting joined successfully'
+          clientType,
+          message: `Meeting joined successfully with ${clientType} client`
         });
         
       } catch (error) {
@@ -196,13 +212,14 @@ class HeadlessRunner {
       const { meetingId } = req.params;
       
       if (this.activeMeetings.has(meetingId)) {
-        const { webexClient, meetingUrl, startTime } = this.activeMeetings.get(meetingId);
+        const { webexClient, meetingUrl, clientType, startTime } = this.activeMeetings.get(meetingId);
         const status = webexClient.getStatus();
         
         res.json({
           success: true,
           meetingId,
           meetingUrl,
+          clientType,
           startTime,
           ...status
         });
@@ -219,6 +236,7 @@ class HeadlessRunner {
       const meetings = Array.from(this.activeMeetings.entries()).map(([meetingId, data]) => ({
         meetingId,
         meetingUrl: data.meetingUrl,
+        clientType: data.clientType,
         startTime: data.startTime,
         status: data.webexClient.getStatus()
       }));
@@ -233,9 +251,10 @@ class HeadlessRunner {
     // Start server
     const server = app.listen(3001, () => {
       console.log('🌐 API server started on port 3001');
+      console.log(`🎛️ Multistream default: ${this.enableMultistream ? 'ENABLED' : 'DISABLED'} (set ENABLE_MULTISTREAM=true to change)`);
       console.log('📋 Available endpoints:');
       console.log('   GET  /health');
-      console.log('   POST /join');
+      console.log('   POST /join  (body: {meetingUrl, hostEmail?, enableMultistream?})');
       console.log('   POST /leave');
       console.log('   GET  /meetings');
       console.log('   GET  /meetings/:id/status');

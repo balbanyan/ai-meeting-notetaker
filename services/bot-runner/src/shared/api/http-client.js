@@ -70,6 +70,33 @@ class BackendClient {
   }
 
   /**
+   * Send speaker event to backend
+   */
+  async sendSpeakerEvent(eventData) {
+    try {
+      const response = await axios.post(`${this.baseURL}/events/speaker-started`, eventData, {
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log(`✅ SPEAKER EVENT SENT - Member: ${eventData.member_name || eventData.member_id}`);
+      
+      // For Electron: also log to UI if addLog function is available
+      if (typeof window !== 'undefined' && window.addLog) {
+        window.addLog(`✅ Speaker event sent successfully`, 'success');
+      }
+      
+      return response.data;
+
+    } catch (error) {
+      console.error(`❌ SPEAKER EVENT SEND FAILED`, error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Test connection to backend
    */
   async testConnection() {

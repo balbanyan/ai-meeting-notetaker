@@ -62,7 +62,7 @@ class BotRunnerApp {
         contextIsolation: false,
         webSecurity: false // For development only
       },
-      title: 'AI Meeting Notetaker - Bot Runner'
+      title: 'AI Meeting Notetaker - Bot Runner (Multistream)'
     });
 
     // Load the HTML file
