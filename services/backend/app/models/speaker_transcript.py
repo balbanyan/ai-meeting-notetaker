@@ -9,7 +9,7 @@ class SpeakerTranscript(Base):
     __tablename__ = "speaker_transcripts"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)  # UUID primary key
-    meeting_id = Column(String(2048), nullable=False, index=True)  # Meeting link/URL
+    meeting_id = Column(UUID(as_uuid=True), ForeignKey('meetings.id'), nullable=False, index=True)  # Foreign key to meetings table
     transcript_text = Column(Text, nullable=False)                 # Transcript segment for this speaker
     speaker_member_id = Column(String(255), nullable=True, index=True)     # Member ID from speaker_events
     speaker_name = Column(String(255), nullable=True)             # Member name for easy reference
@@ -19,7 +19,8 @@ class SpeakerTranscript(Base):
     confidence_score = Column(Float, nullable=False, default=0.5) # Mapping confidence (0.0-1.0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
-    # Relationship to source audio chunk
+    # Relationships
+    meeting = relationship("Meeting", back_populates="speaker_transcripts")
     source_audio_chunk = relationship("AudioChunk", back_populates="speaker_transcripts")
     
     def __repr__(self):

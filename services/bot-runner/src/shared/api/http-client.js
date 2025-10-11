@@ -90,7 +90,7 @@ class BackendClient {
         }
       });
 
-      console.log(`✅ SPEAKER EVENT SENT - Member: ${eventData.member_name || eventData.member_id}`);
+      console.log(`✅ SPEAKER EVENT SENT`);
       
       // For Electron: also log to UI if addLog function is available
       if (typeof window !== 'undefined' && window.addLog) {
@@ -101,6 +101,57 @@ class BackendClient {
 
     } catch (error) {
       console.error(`❌ SPEAKER EVENT SEND FAILED`, error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch meeting metadata from Webex and register with backend
+   * Backend handles all Webex API calls and returns meeting UUID
+   */
+  async fetchAndRegisterMeeting(meetingUrl) {
+    try {
+      console.log(`📋 Fetching and registering meeting with backend...`);
+      
+      const response = await axios.post(
+        `${this.baseURL}/meetings/fetch-and-register`,
+        { meeting_url: meetingUrl },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      const { meeting_uuid, webex_meeting_id, is_new, last_chunk_id } = response.data;
+      console.log(`✅ Meeting registered - UUID: ${meeting_uuid}, Is New: ${is_new}, Last Chunk: ${last_chunk_id}`);
+      
+      return response.data;
+
+    } catch (error) {
+      console.error(`❌ FETCH AND REGISTER FAILED`, error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Update meeting status (active/inactive)
+   */
+  async updateMeetingStatus(meetingUuid, statusData) {
+    try {
+      const response = await axios.patch(`${this.baseURL}/meetings/${meetingUuid}/status`, statusData, {
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log(`✅ Meeting status updated - UUID: ${meetingUuid}`);
+      return response.data;
+
+    } catch (error) {
+      console.error(`❌ MEETING STATUS UPDATE FAILED`, error.response?.data || error.message);
       throw error;
     }
   }

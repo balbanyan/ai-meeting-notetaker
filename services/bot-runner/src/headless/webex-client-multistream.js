@@ -16,7 +16,9 @@ const os = require('os');
 class MultistreamWebexClient {
   constructor(page) {
     this.page = page;
-    this.meetingId = null;
+    this.meetingUrl = null;
+    this.meetingUuid = null;  // Internal meeting UUID from backend
+    this.webexMeetingId = null;  // Webex's meeting ID
     this.hostEmail = null;
     this.isInMeeting = false;
     
@@ -43,10 +45,13 @@ class MultistreamWebexClient {
   async joinMeeting(meetingUrl) {
     try {
       this.logger('🚀 Starting headless multistream meeting join...', 'info');
-      this.meetingId = meetingUrl;
+      this.meetingUrl = meetingUrl;
       
       // Test backend connection
       await this.testBackendConnection();
+
+      // Fetch meeting metadata from Webex and register with backend
+      await this.fetchAndRegisterMeeting(meetingUrl);
 
       // Set up browser environment
       await this.setupBrowserEnvironment();
@@ -69,7 +74,9 @@ class MultistreamWebexClient {
 
       return {
         success: true,
-        meetingId: this.meetingId,
+        meetingId: this.meetingUuid,
+        webexMeetingId: this.webexMeetingId,
+        hostEmail: this.hostEmail,
         message: 'Multistream meeting joined successfully'
       };
 
@@ -80,6 +87,30 @@ class MultistreamWebexClient {
         error: error.message
       };
     }
+  }
+
+  /**
+   * Fetch meeting metadata and register with backend
+   * Backend handles all Webex API calls
+   */
+  async fetchAndRegisterMeeting(meetingUrl) {
+    this.logger('📋 Fetching and registering meeting via backend...', 'info');
+    
+    // Backend does everything: fetch from Webex APIs + register in DB
+    const registration = await this.backendClient.fetchAndRegisterMeeting(meetingUrl);
+    
+    // Store response data
+    this.meetingUuid = registration.meeting_uuid;
+    this.webexMeetingId = registration.webex_meeting_id;
+    this.hostEmail = registration.host_email;
+    
+    this.logger(`✅ Meeting registered - UUID: ${this.meetingUuid}`, 'success');
+    
+    if (registration.last_chunk_id > 0) {
+      this.logger(`📊 Continuing from chunk #${registration.last_chunk_id + 1}`, 'info');
+    }
+    
+    return registration;
   }
 
   async setupBrowserEnvironment() {
@@ -221,7 +252,7 @@ class MultistreamWebexClient {
             const firstMedia = remoteMediaArray[0]; // Use only first stream
             
             console.log(`🎵 Processing first audio stream: ${firstMedia.id}`);
-            console.log(`🔍 Stream state: ${firstMedia.sourceState}, Member: ${firstMedia.memberId || 'unknown'}`);
+            console.log(`🔍 Stream state: ${firstMedia.sourceState}`);
             
             if (firstMedia.stream) {
               // Store the audio stream globally
@@ -551,21 +582,21 @@ class MultistreamWebexClient {
           };
           
           window.speakerEvents.push(speakerEvent);
-          console.log(`✅ Speaker event queued: ${memberName || speakerId}`);
+          console.log(`✅ Speaker event queued`);
           
         } catch (error) {
           console.error(`❌ Failed to process speaker event: ${error.message}`);
         }
       };
       
-      // Store meeting ID for speaker events
+      // Store meeting UUID for speaker events
       window.meetingId = 'unknown';
     });
     
-    // Update meeting ID in browser context
-    await this.page.evaluate((meetingId) => {
-      window.meetingId = meetingId;
-    }, this.meetingId);
+    // Update meeting UUID in browser context
+    await this.page.evaluate((meetingUuid) => {
+      window.meetingId = meetingUuid;
+    }, this.meetingUuid);
     
     // Start polling for speaker events from browser
     this.speakerEventInterval = setInterval(async () => {
@@ -604,9 +635,9 @@ class MultistreamWebexClient {
   // ============================================================================
 
   async initializeAudioProcessor() {
-    this.logger('🔧 Initializing AudioProcessor with meeting details...', 'info');
+    this.logger('🔧 Initializing AudioProcessor with meeting UUID...', 'info');
     
-    this.audioProcessor = new AudioProcessor(this.meetingId, this.hostEmail, this.backendClient);
+    this.audioProcessor = new AudioProcessor(this.meetingUuid, this.hostEmail, this.backendClient);
     await this.audioProcessor.initializeChunkCount();
     
     this.logger(`✅ AudioProcessor initialized - Starting from chunk #${this.audioProcessor.chunkCount + 1}`, 'success');
@@ -658,7 +689,7 @@ class MultistreamWebexClient {
       const chunkStartTime = new Date(chunkEndTime.getTime() - 10000); // 10 seconds back
       
       await this.backendClient.sendAudioChunk(
-        this.meetingId, 
+        this.meetingUuid, 
         chunkId, 
         wavBuffer, 
         this.hostEmail,
@@ -747,6 +778,19 @@ class MultistreamWebexClient {
       this.speakerEventInterval = null;
     }
     
+    // 2.5 Update meeting status in backend
+    try {
+      if (this.meetingUuid) {
+        await this.backendClient.updateMeetingStatus(this.meetingUuid, {
+          is_active: false,
+          actual_leave_time: new Date().toISOString()
+        });
+        this.logger('✅ Meeting status updated to inactive', 'success');
+      }
+    } catch (error) {
+      this.logger(`⚠️ Error updating meeting status: ${error.message}`, 'warn');
+    }
+    
     // 3. Clean up browser-side resources
     try {
       if (this.page && !this.page.isClosed()) {
@@ -811,7 +855,9 @@ class MultistreamWebexClient {
     }
     
     // 5. Reset instance variables
-    this.meetingId = null;
+    this.meetingUrl = null;
+    this.meetingUuid = null;
+    this.webexMeetingId = null;
     this.hostEmail = null;
     this.audioProcessor = null;
     
@@ -863,6 +909,15 @@ class MultistreamWebexClient {
           clearTimeout(window.silenceTimer);
         }
       });
+      
+      // Update meeting status in backend
+      if (this.meetingUuid) {
+        await this.backendClient.updateMeetingStatus(this.meetingUuid, {
+          is_active: false,
+          actual_leave_time: new Date().toISOString()
+        });
+        this.logger('✅ Meeting status updated to inactive', 'success');
+      }
     } catch (error) {
       this.logger(`❌ Cleanup error: ${error.message}`, 'error');
     }
@@ -873,7 +928,9 @@ class MultistreamWebexClient {
   getStatus() {
     return {
       isInMeeting: this.isInMeeting,
-      meetingId: this.meetingId,
+      meetingUrl: this.meetingUrl,
+      meetingUuid: this.meetingUuid,
+      webexMeetingId: this.webexMeetingId,
       hostEmail: this.hostEmail,
       mode: 'headless-multistream',
       audioProcessing: !!this.audioProcessor,

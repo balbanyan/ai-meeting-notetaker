@@ -7,6 +7,11 @@ class Settings(BaseSettings):
     bot_service_token: str = "dev-bot-token-12345"
     bot_runner_url: str = "http://localhost:3001"
     
+    # Webex API Settings (Service App with refresh token)
+    webex_client_id: str = ""
+    webex_client_secret: str = ""
+    webex_refresh_token: str = ""  # Service App refresh token (90-day validity)
+    
     # Whisper Transcription Settings
     whisper_groq_api: str = ""
     whisper_model: str = "whisper-large-v3"

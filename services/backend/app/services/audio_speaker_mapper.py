@@ -88,8 +88,7 @@ class AudioSpeakerMapper:
             ).order_by(SpeakerEvent.speaker_started_at).all()
             
             print(f"🔍 Speaker query: {chunk.audio_started_at} to {chunk.audio_ended_at} (±{buffer_seconds}s buffer)")
-            for event in speaker_events:
-                print(f"   Found speaker: {event.member_name or event.member_id} at {event.speaker_started_at}")
+            print(f"   Found {len(speaker_events)} speaker events")
             
             return speaker_events
             

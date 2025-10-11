@@ -3,7 +3,7 @@ require('dotenv').config();
 const config = {
   // Webex Configuration
   webex: {
-    botAccessToken: process.env.WEBEX_BOT_ACCESS_TOKEN,
+    botAccessToken: process.env.WEBEX_BOT_ACCESS_TOKEN,  // For SDK (joining meetings)
     apiBaseUrl: process.env.WEBEX_API_BASE_URL || 'https://webexapis.com/v1',
   },
   
@@ -29,7 +29,7 @@ const config = {
   // Runtime Mode Configuration
   mode: {
     // BOT_MODE: 'gui' | 'headless' - determines if GUI or headless mode
-    type: process.env.BOT_MODE || 'gui',
+    type: process.env.BOT_MODE || 'headless',
     enableLogging: process.env.ENABLE_LOGGING === 'true',
   },
 };

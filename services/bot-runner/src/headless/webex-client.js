@@ -16,7 +16,9 @@ const os = require('os');
 class PuppeteerWebexClient {
   constructor(page) {
     this.page = page;
-    this.meetingId = null;
+    this.meetingUrl = null;
+    this.meetingUuid = null;  // Internal meeting UUID from backend
+    this.webexMeetingId = null;  // Webex's meeting ID
     this.hostEmail = null;
     this.isInMeeting = false;
     
@@ -41,10 +43,13 @@ class PuppeteerWebexClient {
   async joinMeeting(meetingUrl) {
     try {
       this.logger('🚀 Starting headless meeting join...', 'info');
-      this.meetingId = meetingUrl;
+      this.meetingUrl = meetingUrl;
       
       // Test backend connection
       await this.testBackendConnection();
+
+      // Fetch meeting metadata from Webex and register with backend
+      await this.fetchAndRegisterMeeting(meetingUrl);
 
       // Set up browser environment
       await this.setupBrowserEnvironment();
@@ -64,7 +69,9 @@ class PuppeteerWebexClient {
 
       return {
         success: true,
-        meetingId: this.meetingId,
+        meetingId: this.meetingUuid,
+        webexMeetingId: this.webexMeetingId,
+        hostEmail: this.hostEmail,
         message: 'Meeting joined successfully'
       };
 
@@ -75,6 +82,30 @@ class PuppeteerWebexClient {
         error: error.message
       };
     }
+  }
+
+  /**
+   * Fetch meeting metadata and register with backend
+   * Backend handles all Webex API calls
+   */
+  async fetchAndRegisterMeeting(meetingUrl) {
+    this.logger('📋 Fetching and registering meeting via backend...', 'info');
+    
+    // Backend does everything: fetch from Webex APIs + register in DB
+    const registration = await this.backendClient.fetchAndRegisterMeeting(meetingUrl);
+    
+    // Store response data
+    this.meetingUuid = registration.meeting_uuid;
+    this.webexMeetingId = registration.webex_meeting_id;
+    this.hostEmail = registration.host_email;
+    
+    this.logger(`✅ Meeting registered - UUID: ${this.meetingUuid}`, 'success');
+    
+    if (registration.last_chunk_id > 0) {
+      this.logger(`📊 Continuing from chunk #${registration.last_chunk_id + 1}`, 'info');
+    }
+    
+    return registration;
   }
 
   async setupBrowserEnvironment() {
@@ -433,6 +464,19 @@ class PuppeteerWebexClient {
       clearInterval(this.audioInterval);
     }
     
+    // Update meeting status to inactive
+    try {
+      if (this.meetingUuid) {
+        await this.backendClient.updateMeetingStatus(this.meetingUuid, {
+          is_active: false,
+          actual_leave_time: new Date().toISOString()
+        });
+        this.logger('✅ Meeting status updated to inactive', 'success');
+      }
+    } catch (error) {
+      this.logger(`⚠️ Error updating meeting status: ${error.message}`, 'warn');
+    }
+    
     // Close page and browser
     try {
       if (this.page) {
@@ -447,13 +491,13 @@ class PuppeteerWebexClient {
   }
 
   /**
-   * Initialize AudioProcessor with meeting details and backend chunk count
+   * Initialize AudioProcessor with meeting UUID
    */
   async initializeAudioProcessor() {
-    this.logger('🔧 Initializing AudioProcessor with meeting details...', 'info');
+    this.logger('🔧 Initializing AudioProcessor with meeting UUID...', 'info');
     
-    // Create AudioProcessor with proper parameters
-    this.audioProcessor = new AudioProcessor(this.meetingId, this.hostEmail, this.backendClient);
+    // Create AudioProcessor with meeting UUID
+    this.audioProcessor = new AudioProcessor(this.meetingUuid, this.hostEmail, this.backendClient);
     
     // Initialize chunk count from backend to continue sequence
     await this.audioProcessor.initializeChunkCount();
@@ -510,8 +554,8 @@ class PuppeteerWebexClient {
       const wavBuffer = await this.convertWebmToWav(webmBuffer);
       this.logger(`✅ Conversion complete: ${webmBuffer.length} bytes WebM → ${wavBuffer.length} bytes WAV`, 'success');
       
-      // Send WAV chunk to backend
-      await this.backendClient.sendAudioChunk(this.meetingId, chunkId, wavBuffer, this.hostEmail);
+      // Send WAV chunk to backend using meeting UUID
+      await this.backendClient.sendAudioChunk(this.meetingUuid, chunkId, wavBuffer, this.hostEmail);
       this.logger(`✅ WAV chunk sent successfully - Status: saved`, 'success');
     } catch (error) {
       this.logger(`❌ Failed to process MediaRecorder chunk: ${error.message}`, 'error');
@@ -597,6 +641,15 @@ class PuppeteerWebexClient {
         window.webexAudioStream = null;
         window.audioChunkReady = null;
       });
+      
+      // Update meeting status in backend
+      if (this.meetingUuid) {
+        await this.backendClient.updateMeetingStatus(this.meetingUuid, {
+          is_active: false,
+          actual_leave_time: new Date().toISOString()
+        });
+        this.logger('✅ Meeting status updated to inactive', 'success');
+      }
     } catch (error) {
       this.logger(`❌ Cleanup error: ${error.message}`, 'error');
     }

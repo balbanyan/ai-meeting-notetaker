@@ -100,7 +100,6 @@ async function initializeWebexSDK() {
             console.log('Webex instance:', webex);
             console.log('Current meeting:', currentMeeting);
             console.log('Meeting ID:', meetingId);
-            console.log('Host email:', hostEmail);
             console.log('Audio processor:', audioProcessor);
         };
         
