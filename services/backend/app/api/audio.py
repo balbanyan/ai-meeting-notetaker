@@ -33,6 +33,8 @@ async def save_audio_chunk(
     background_tasks: BackgroundTasks,
     meeting_id: str = Form(...),
     chunk_id: int = Form(...),
+    audio_started_at: str = Form(None),
+    audio_ended_at: str = Form(None),
     host_email: str = Form(None),
     audio_file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -43,12 +45,26 @@ async def save_audio_chunk(
         # Read the audio file
         audio_data = await audio_file.read()
         
+        # Parse audio timing if provided
+        parsed_audio_started_at = None
+        parsed_audio_ended_at = None
+        
+        if audio_started_at:
+            from datetime import datetime
+            parsed_audio_started_at = datetime.fromisoformat(audio_started_at.replace('Z', '+00:00'))
+            
+        if audio_ended_at:
+            from datetime import datetime  
+            parsed_audio_ended_at = datetime.fromisoformat(audio_ended_at.replace('Z', '+00:00'))
+        
         # Create new audio chunk record
         chunk = AudioChunk(
             meeting_id=meeting_id,
             chunk_id=chunk_id,
             chunk_audio=audio_data,
             host_email=host_email,
+            audio_started_at=parsed_audio_started_at,
+            audio_ended_at=parsed_audio_ended_at,
             transcription_status="ready"  # Ready for transcription
         )
         

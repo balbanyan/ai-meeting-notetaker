@@ -17,6 +17,10 @@ class AudioProcessor {
     this.isProcessing = false;
     this.chunkCount = 0;
     
+    // NEW: Track actual audio timing
+    this.currentChunkStartTime = null;
+    this.currentChunkEndTime = null;
+    
     // Audio processing nodes (for cleanup)
     this.audioContext = null;
     this.source = null;
@@ -56,6 +60,7 @@ class AudioProcessor {
 
     try {
       this.isProcessing = true;
+      this.currentChunkStartTime = new Date(); // NEW: Track when first chunk starts
       console.log('🎤 Starting audio processing...');
 
       // Create audio context
@@ -501,6 +506,9 @@ class AudioProcessor {
     }
 
     try {
+      // NEW: Record when this chunk's audio ended
+      this.currentChunkEndTime = new Date();
+      
       this.chunkCount++;
       const chunkId = this.chunkCount;
       
@@ -541,19 +549,22 @@ class AudioProcessor {
       // Convert buffer to WAV format
       const audioData = this.convertToWAV(this.chunkBuffer);
       
-      // Send to backend
+      // Send to backend with audio timing
       if (this.backendClient) {
         await this.backendClient.sendAudioChunk(
           this.meetingId,
           chunkId,
           audioData,
-          this.hostEmail
+          this.hostEmail,
+          this.currentChunkStartTime ? this.currentChunkStartTime.toISOString() : null,
+          this.currentChunkEndTime ? this.currentChunkEndTime.toISOString() : null
         );
       }
 
       // Reset buffer for next chunk
       this.chunkBuffer = [];
       this.chunkStartTime = Date.now();
+      this.currentChunkStartTime = new Date(); // NEW: Start time for next chunk
 
     } catch (error) {
       console.error('❌ Failed to process audio chunk:', error);

@@ -10,7 +10,7 @@ class BackendClient {
   /**
    * Send audio chunk to backend
    */
-  async sendAudioChunk(meetingId, chunkId, audioData, hostEmail = null) {
+  async sendAudioChunk(meetingId, chunkId, audioData, hostEmail = null, audioStartedAt = null, audioEndedAt = null) {
     try {
       // Create form data using browser FormData API (works in Electron renderer)
       const formData = new FormData();
@@ -23,6 +23,15 @@ class BackendClient {
       
       if (hostEmail) {
         formData.append('host_email', hostEmail);
+      }
+      
+      // Add audio timing if provided
+      if (audioStartedAt) {
+        formData.append('audio_started_at', audioStartedAt);
+      }
+      
+      if (audioEndedAt) {
+        formData.append('audio_ended_at', audioEndedAt);
       }
 
       const response = await axios.post(`${this.baseURL}/audio/chunk`, formData, {

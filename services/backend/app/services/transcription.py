@@ -143,12 +143,28 @@ async def transcribe_chunk_async(chunk_uuid: str):
         if result['success']:
             chunk.chunk_transcript = result['transcript']
             chunk.transcription_status = "completed"
+            
+            # COMMIT FIRST to ensure transcript is saved before speaker mapping
+            db.commit()
+            db.refresh(chunk)  # Refresh to ensure we have latest data
+            
             logger.info(f"✅ Transcription completed for chunk UUID: {chunk.id}, chunk_id: {chunk.chunk_id}")
+            
+            # NEW: Trigger speaker mapping after successful transcription (AFTER commit)
+            if chunk.chunk_transcript and chunk.audio_started_at:
+                try:
+                    from app.services.audio_speaker_mapper import AudioSpeakerMapper
+                    mapper = AudioSpeakerMapper()
+                    await mapper.process_completed_transcript(str(chunk.id))
+                    logger.info(f"🗣️ Speaker mapping completed for chunk UUID: {chunk.id}")
+                except Exception as mapping_error:
+                    logger.error(f"❌ Speaker mapping failed for chunk UUID: {chunk.id}: {str(mapping_error)}")
+            else:
+                logger.info(f"⚠️ Skipping speaker mapping - missing transcript or timing data for chunk UUID: {chunk.id}")
         else:
             chunk.transcription_status = "failed"
+            db.commit()
             logger.error(f"❌ Transcription failed for chunk UUID: {chunk.id}, chunk_id: {chunk.chunk_id}: {result['error']}")
-        
-        db.commit()
         
     except Exception as e:
         # Mark as failed on any error
