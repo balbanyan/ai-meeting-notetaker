@@ -13,8 +13,8 @@ class HeadlessRunner {
     this.activeMeetings = new Map();
     this.isRunning = false;
     
-    // Multistream configuration
-    this.enableMultistream = process.env.ENABLE_MULTISTREAM === 'true' || false;
+    // Multistream configuration (default: true)
+    this.enableMultistream = process.env.ENABLE_MULTISTREAM !== 'false';
     console.log(`🎛️ Multistream mode: ${this.enableMultistream ? 'ENABLED' : 'DISABLED'}`);
   }
 
@@ -251,7 +251,7 @@ class HeadlessRunner {
     // Start server
     const server = app.listen(3001, () => {
       console.log('🌐 API server started on port 3001');
-      console.log(`🎛️ Multistream default: ${this.enableMultistream ? 'ENABLED' : 'DISABLED'} (set ENABLE_MULTISTREAM=true to change)`);
+      console.log(`🎛️ Multistream: ${this.enableMultistream ? 'ENABLED' : 'DISABLED'} (set ENABLE_MULTISTREAM=false to disable)`);
       console.log('📋 Available endpoints:');
       console.log('   GET  /health');
       console.log('   POST /join  (body: {meetingUrl, hostEmail?, enableMultistream?})');

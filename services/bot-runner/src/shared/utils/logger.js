@@ -17,17 +17,6 @@ function createLogger(context = '') {
 }
 
 /**
- * Create browser-compatible addLog function for page evaluation
- * @returns {Function} Browser logger function with timestamp
- */
-function createBrowserLogger() {
-  return function addLog(message, level = 'info') {
-    const timestamp = new Date().toLocaleTimeString();
-    console.log(`[${timestamp}] ${message}`);
-  };
-}
-
-/**
  * Create Electron-compatible addLog function for renderer
  * @param {HTMLElement} logsContainer - Container element for log entries
  * @returns {Function} Electron logger function with DOM updates
@@ -72,7 +61,6 @@ async function testBackend(backendClient, logger) {
 
 module.exports = {
   createLogger,
-  createBrowserLogger,
   createElectronLogger,
   testBackend
 };

@@ -1,6 +1,4 @@
 const crypto = require('crypto');
-const { analyzeAudioChunk } = require('../utils');
-
 const { config } = require('../config');
 
 /**

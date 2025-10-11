@@ -28,9 +28,8 @@ const config = {
   
   // Runtime Mode Configuration
   mode: {
-    // BOT_MODE: 'gui' | 'headless' - determines if GUI or headless mode
+    // BOT_MODE: 'gui' | 'headless' - determines if GUI or headless mode (default: headless)
     type: process.env.BOT_MODE || 'headless',
-    enableLogging: process.env.ENABLE_LOGGING === 'true',
   },
 };
 

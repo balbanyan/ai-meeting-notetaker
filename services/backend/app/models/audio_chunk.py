@@ -16,11 +16,11 @@ class AudioChunk(Base):
     transcription_status = Column(String(20), default="ready")    # Transcription status: ready, processing, completed, failed
     host_email = Column(String(255), nullable=True)               # Meeting host email
     
-    # NEW: Actual audio timing
+    # Actual audio timing
     audio_started_at = Column(DateTime(timezone=True), nullable=True)  # When audio recording started
     audio_ended_at = Column(DateTime(timezone=True), nullable=True)    # When audio recording ended
     
-    # Existing: Processing timing
+    # Processing timing
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

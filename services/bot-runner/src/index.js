@@ -11,7 +11,6 @@ program
   .version('2.0.0')
   .option('--headless', 'Run in headless mode using Puppeteer')
   .option('--gui', 'Run in GUI mode using Electron (default)')
-  .option('--enable-logging', 'Enable verbose logging')
   .parse();
 
 const options = program.opts();
@@ -28,10 +27,8 @@ if (options.headless) {
   // Backward compatibility
   isHeadless = true;
 } else {
-  isHeadless = false;
+  isHeadless = true; // Default to headless
 }
-
-const enableLogging = options.enableLogging || config.mode.enableLogging;
 
 async function main() {
   try {
@@ -43,10 +40,6 @@ async function main() {
                       'default';
     
     console.log(`🎯 Mode: ${isHeadless ? 'HEADLESS' : 'GUI'} (source: ${modeSource})`);
-    
-    if (enableLogging) {
-      console.log('🔧 Logging enabled');
-    }
     
     if (isHeadless) {
       console.log('🤖 Starting AI Meeting Notetaker in HEADLESS mode...');
@@ -113,9 +106,7 @@ async function main() {
     
   } catch (error) {
     console.error('❌ Failed to start bot runner:', error.message);
-    if (enableLogging) {
-      console.error('Error details:', error);
-    }
+    console.error('Error details:', error);
     process.exit(1);
   }
 }

@@ -6,7 +6,6 @@ echo "🚀 Starting AI Meeting Notetaker..."
 
 # Parse command line arguments
 MODE=""
-LOGGING=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -18,28 +17,22 @@ while [[ $# -gt 0 ]]; do
             MODE="headless"
             shift
             ;;
-        --enable-logging)
-            LOGGING="true"
-            shift
-            ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --gui              Start in GUI mode (Electron)"
             echo "  --headless         Start in headless mode (Puppeteer)"
-            echo "  --enable-logging   Enable verbose logging"
             echo "  -h, --help         Show this help message"
             echo ""
             echo "Environment Variables:"
-            echo "  BOT_MODE           Set to 'gui' or 'headless' (default: gui)"
-            echo "  ENABLE_LOGGING     Set to 'true' to enable logging (default: false)"
+            echo "  BOT_MODE              Set to 'gui' or 'headless' (default: headless)"
+            echo "  ENABLE_MULTISTREAM    Set to 'false' to disable multistream (default: enabled)"
             echo ""
             echo "Examples:"
-            echo "  $0                    # Start in GUI mode (default)"
-            echo "  $0 --headless        # Start in headless mode"
-            echo "  $0 --gui --enable-logging  # Start GUI with logging"
-            echo "  BOT_MODE=headless $0  # Use environment variable"
+            echo "  $0                    # Start in headless mode with multistream (default)"
+            echo "  $0 --gui             # Start in GUI mode"
+            echo "  BOT_MODE=gui $0      # Use environment variable for GUI mode"
             exit 0
             ;;
         *)
@@ -61,15 +54,9 @@ if [ -n "$MODE" ]; then
     export BOT_MODE="$MODE"
 fi
 
-if [ -n "$LOGGING" ]; then
-    export ENABLE_LOGGING="$LOGGING"
-fi
-
 # Show current configuration
-CURRENT_MODE=${BOT_MODE:-"gui"}
-CURRENT_LOGGING=${ENABLE_LOGGING:-"false"}
+CURRENT_MODE=${BOT_MODE:-"headless"}
 echo "🎯 Mode: $CURRENT_MODE"
-echo "🔧 Logging: $CURRENT_LOGGING"
 
 # Function to kill background processes on exit
 cleanup() {
@@ -98,19 +85,11 @@ cd services/bot-runner
 
 # Start bot runner based on mode
 if [ "$CURRENT_MODE" = "headless" ]; then
-    if [ "$CURRENT_LOGGING" = "true" ]; then
-        npm run dev:headless &
-    else
-        npm run start:headless &
-    fi
+    npm run start &
     BOTRUNNER_PID=$!
     echo "   - Headless mode: API will be available at http://localhost:3001"
 else
-    if [ "$CURRENT_LOGGING" = "true" ]; then
-        npm run dev &
-    else
-        npm run start &
-    fi
+    npm run start:gui &
     BOTRUNNER_PID=$!
     echo "   - GUI mode: Electron app should open"
 fi
