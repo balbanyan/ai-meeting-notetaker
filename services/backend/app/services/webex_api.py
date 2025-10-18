@@ -9,19 +9,29 @@ class WebexMeetingsAPI:
     Uses Webex Service App refresh token for authentication.
     """
     
-    def __init__(self, client_id: str, client_secret: str, refresh_token: str):
+    def __init__(self, client_id: str = "", client_secret: str = "", refresh_token: str = "", personal_token: str = ""):
         self.base_url = "https://webexapis.com/v1"
         self.client_id = client_id
         self.client_secret = client_secret
         self.refresh_token = refresh_token
+        self.personal_token = personal_token  # Personal access token (overrides OAuth)
         self.access_token: Optional[str] = None  # Cached access token
     
     async def _get_access_token(self) -> str:
         """
-        Get OAuth access token using refresh token.
+        Get OAuth access token using refresh token or personal token.
+        Personal token takes priority (for testing).
         Webex Service Apps use refresh_token grant, not client_credentials.
         Caches the token for reuse.
         """
+        # If personal token is provided, use it directly
+        if self.personal_token:
+            # Strip whitespace/newlines that might have been accidentally added
+            cleaned_token = self.personal_token.strip()
+            print("✅ Using personal access token from config")
+            print(f"🔍 Token length: {len(cleaned_token)} chars, starts with: {cleaned_token[:20]}...")
+            return cleaned_token
+        
         # If we already have a cached access token, use it
         if self.access_token:
             return self.access_token
@@ -144,6 +154,78 @@ class WebexMeetingsAPI:
         except Exception as e:
             print(f"❌ Failed to get meeting participants: {str(e)}")
             return []
+    
+    async def get_meeting_participants_with_host(self, webex_meeting_id: str) -> Dict:
+        """
+        Call GET /meetingParticipants?meetingId={webex_meeting_id}
+        Returns dict with participant emails and host email
+        
+        Returns:
+            {
+                "participant_emails": List[str],
+                "host_email": Optional[str]
+            }
+        
+        API Reference: https://developer.webex.com/meeting/docs/api/v1/meeting-participants/list-meeting-participants
+        """
+        try:
+            access_token = await self._get_access_token()
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.base_url}/meetingParticipants",
+                    params={
+                        "meetingId": webex_meeting_id,
+                        "max": 100  # Get up to 100 participants
+                    },
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json"
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    items = data.get("items", [])
+                    
+                    # Extract emails and identify host
+                    participant_emails = []
+                    host_email = None
+                    
+                    for participant in items:
+                        email = participant.get("email") or participant.get("hostEmail")
+                        if email:
+                            participant_emails.append(email)
+                            
+                            # Check if this participant is the host
+                            if participant.get("host") is True or participant.get("hostEmail"):
+                                host_email = email
+                    
+                    # If no host identified, use first participant
+                    if not host_email and participant_emails:
+                        host_email = participant_emails[0]
+                    
+                    print(f"✅ Retrieved {len(participant_emails)} participant emails")
+                    if host_email:
+                        print(f"   Host identified: {host_email}")
+                    
+                    return {
+                        "participant_emails": participant_emails,
+                        "host_email": host_email
+                    }
+                else:
+                    print(f"❌ List Participants API error: {response.status_code} - {response.text}")
+                    return {
+                        "participant_emails": [],
+                        "host_email": None
+                    }
+                    
+        except Exception as e:
+            print(f"❌ Failed to get meeting participants: {str(e)}")
+            return {
+                "participant_emails": [],
+                "host_email": None
+            }
     
     def extract_meeting_metadata(self, api_response: Dict) -> Dict:
         """
