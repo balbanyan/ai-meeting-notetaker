@@ -67,6 +67,37 @@ class WebexMeetingsAPI:
                 print(f"❌ OAuth token generation failed: {response.status_code} - {error_detail}")
                 raise Exception(f"Failed to get access token: {response.status_code} - {error_detail}")
     
+    async def get_meeting_by_id(self, meeting_id: str) -> Optional[Dict]:
+        """
+        Call GET /meetings/{meetingId}
+        Returns meeting details including webLink, meetingNumber, hostEmail, etc.
+        
+        API Reference: https://developer.webex.com/docs/api/v1/meetings/get-a-meeting
+        """
+        try:
+            access_token = await self._get_access_token()
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.base_url}/meetings/{meeting_id}",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json"
+                    }
+                )
+                
+                if response.status_code == 200:
+                    meeting_data = response.json()
+                    print(f"✅ Retrieved meeting details for ID: {meeting_id}")
+                    return meeting_data
+                else:
+                    print(f"❌ Get Meeting API error: {response.status_code} - {response.text}")
+                    return None
+                    
+        except Exception as e:
+            print(f"❌ Failed to get meeting by ID: {str(e)}")
+            return None
+    
     async def get_meeting_by_link(self, meeting_link: str) -> Optional[Dict]:
         """
         Call GET /meetings?webLink={encoded_link}&meetingType=scheduledMeeting

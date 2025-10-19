@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.meeting import Meeting
 from app.models.audio_chunk import AudioChunk
+from app.bot_runner import bot_runner_manager
 
 router = APIRouter()
 
@@ -21,7 +22,7 @@ class RegisterAndJoinRequest(BaseModel):
     start_time: str  # ISO format
     end_time: str  # ISO format
     meeting_type: str
-    meeting_url: str  # Meeting URL for bot join
+    meeting_url: str  # Meeting URL from frontend (required)
 
 
 class RegisterAndJoinResponse(BaseModel):
@@ -40,11 +41,11 @@ async def register_and_join_meeting(
     Register meeting from embedded app and trigger bot join.
     
     Workflow:
-    1. Receive meeting metadata from Webex Embedded App SDK
-    2. Call Webex API to get participant emails
-    3. Extract host email from participants
+    1. Receive meeting metadata and URL from Webex Embedded App frontend
+    2. Use meeting URL directly from frontend (user-provided)
+    3. Call Webex API to get participant emails (optional)
     4. Create/update meeting record in database
-    5. Trigger bot join via bot-runner
+    5. Trigger bot join via bot-runner with user-provided URL
     6. Return success response
     """
     try:
@@ -61,10 +62,13 @@ async def register_and_join_meeting(
             personal_token=settings.webex_personal_access_token
         )
         
-        # Get participant emails and host from Webex API
+        # Use meeting URL directly from frontend
+        meeting_url = request.meeting_url
+        print(f"📍 Using meeting URL from frontend: {meeting_url}")
+        
+        # Get participant emails from Webex API (optional)
         print(f"🌐 Fetching participants for meeting {request.meeting_id}...")
         participant_data = await webex_api.get_meeting_participants_with_host(request.meeting_id)
-        
         participant_emails = participant_data.get("participant_emails", [])
         host_email = participant_data.get("host_email")
         
@@ -98,7 +102,7 @@ async def register_and_join_meeting(
             existing_meeting.actual_join_time = datetime.utcnow()
             existing_meeting.participant_emails = participant_emails
             existing_meeting.host_email = host_email
-            existing_meeting.meeting_link = request.meeting_url
+            existing_meeting.meeting_link = meeting_url  # Use API-fetched URL
             
             # Update scheduled times if provided
             if scheduled_start:
@@ -116,8 +120,8 @@ async def register_and_join_meeting(
             
             new_meeting = Meeting(
                 webex_meeting_id=request.meeting_id,
-                meeting_number=None,  # SDK doesn't provide meeting number
-                meeting_link=request.meeting_url,
+                meeting_number=None,  # Not available from frontend
+                meeting_link=meeting_url,  # Use frontend-provided URL
                 host_email=host_email,
                 participant_emails=participant_emails,
                 scheduled_start_time=scheduled_start,
@@ -138,13 +142,21 @@ async def register_and_join_meeting(
         
         # Trigger bot join via bot-runner
         print(f"🤖 Triggering bot join...")
+        
+        # Ensure bot-runner subprocess is running (start on-demand)
+        if not bot_runner_manager.ensure_running():
+            raise HTTPException(
+                status_code=503,
+                detail="Bot-runner service failed to start"
+            )
+        
         bot_runner_url = f"{settings.bot_runner_url}/join"
         
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 bot_response = await client.post(
                     bot_runner_url,
-                    json={"meetingUrl": request.meeting_url},
+                    json={"meetingUrl": meeting_url},  # Use API-fetched URL
                     headers={"Content-Type": "application/json"}
                 )
                 

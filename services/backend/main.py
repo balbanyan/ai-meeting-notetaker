@@ -12,6 +12,9 @@ from app.api.embedded import router as embedded_router
 # Import database setup
 from app.core.database import create_tables
 
+# Import bot-runner manager
+from app.bot_runner import bot_runner_manager
+
 # Create FastAPI app
 app = FastAPI(
     title="AI Meeting Notetaker",
@@ -42,6 +45,15 @@ async def startup_event():
     print("🚀 Starting AI Meeting Notetaker...")
     create_tables()
     print("✅ Database tables created/verified")
+    print("📦 Bot-runner will start on-demand when first meeting is joined")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    print("🛑 Shutting down AI Meeting Notetaker...")
+    bot_runner_manager.stop()
+    print("✅ Cleanup complete")
 
 
 @app.get("/")

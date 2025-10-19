@@ -1,4 +1,6 @@
-require('dotenv').config();
+const path = require('path');
+// Load .env from backend directory (parent of bot-runner)
+require('dotenv').config({ path: path.join(__dirname, '../../../../.env') });
 
 const config = {
   // Webex Configuration

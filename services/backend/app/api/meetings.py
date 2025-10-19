@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.core.auth import verify_bot_token
 from app.models.meeting import Meeting
 from app.models.audio_chunk import AudioChunk
+from app.bot_runner import bot_runner_manager
 
 router = APIRouter()
 
@@ -32,6 +33,13 @@ async def join_meeting(request: JoinMeetingRequest):
     """Trigger bot to join a meeting via headless bot-runner"""
     try:
         print(f"🚀 JOIN REQUEST received")
+        
+        # Ensure bot-runner subprocess is running (start on-demand)
+        if not bot_runner_manager.ensure_running():
+            raise HTTPException(
+                status_code=503, 
+                detail="Bot-runner service failed to start"
+            )
         
         # Call the headless bot-runner API
         bot_runner_url = f"{settings.bot_runner_url}/join"
@@ -121,12 +129,13 @@ async def fetch_and_register_meeting(
     try:
         print(f"📋 FETCH AND REGISTER - URL: {request.meeting_url[:50]}...")
         
-        # Initialize Webex API client with Service App credentials
+        # Initialize Webex API client with Service App credentials or personal token
         from app.services.webex_api import WebexMeetingsAPI
         webex_api = WebexMeetingsAPI(
             client_id=settings.webex_client_id,
             client_secret=settings.webex_client_secret,
-            refresh_token=settings.webex_refresh_token
+            refresh_token=settings.webex_refresh_token,
+            personal_token=settings.webex_personal_access_token  # For testing
         )
         
         # Fetch complete meeting metadata from Webex APIs

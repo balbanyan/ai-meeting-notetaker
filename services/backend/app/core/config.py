@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     webex_client_id: str = ""
     webex_client_secret: str = ""
     webex_refresh_token: str = ""  # Service App refresh token (90-day validity)
+    webex_personal_access_token: str = ""  # Personal access token (for testing, overrides OAuth flow)
     
     # Whisper Transcription Settings
     whisper_groq_api: str = ""
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        extra = "ignore"  # Ignore bot-runner specific env vars
 
 
 settings = Settings()
