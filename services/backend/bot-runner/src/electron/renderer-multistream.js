@@ -97,10 +97,10 @@ async function initializeWebexSDK() {
         
         // Make debugging available
         window.debugWebex = () => {
-            console.log('Webex instance:', webex);
-            console.log('Current meeting:', currentMeeting);
-            console.log('Meeting ID:', meetingId);
-            console.log('Audio processor:', audioProcessor);
+            console.log('Webex instance available');
+            console.log('Meeting active:', !!currentMeeting);
+            console.log('Meeting ID set:', !!meetingId);
+            console.log('Audio processor active:', !!audioProcessor);
         };
         
         addLog('🔧 Console debugging: Open DevTools → Console → Try debugWebex()', 'info');

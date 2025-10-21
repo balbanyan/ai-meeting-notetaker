@@ -25,20 +25,20 @@ class AudioSpeakerMapper:
     async def process_completed_transcript(self, audio_chunk_id: str):
         """Process audio chunk after transcription completes"""
         try:
-            print(f"🗣️ Starting speaker mapping for chunk {audio_chunk_id}")
+            print(f"🗣️ Starting speaker mapping for chunk UUID: {audio_chunk_id}")
             
             # 1. Get completed audio chunk with transcript and timing
             chunk = self.get_audio_chunk_with_transcript(audio_chunk_id)
             if not chunk:
-                print(f"❌ Chunk not found: {audio_chunk_id}")
+                print(f"❌ Chunk not found: UUID {audio_chunk_id}")
                 return
                 
             if not chunk.chunk_transcript:
-                print(f"⚠️ No transcript available for chunk {audio_chunk_id}")
+                print(f"⚠️ No transcript available for chunk UUID: {audio_chunk_id}")
                 return
                 
             if not chunk.audio_started_at or not chunk.audio_ended_at:
-                print(f"⚠️ Missing audio timing for chunk {audio_chunk_id}")
+                print(f"⚠️ Missing audio timing for chunk UUID: {audio_chunk_id}")
                 return
             
             # 2. Find speaker events for this timeframe
@@ -57,10 +57,10 @@ class AudioSpeakerMapper:
             for segment in transcript_segments:
                 self.save_speaker_transcript(segment, chunk.id, chunk.meeting_id)
             
-            print(f"✅ Speaker mapping completed: {len(transcript_segments)} segments created for chunk {audio_chunk_id}")
+            print(f"✅ Speaker mapping completed: {len(transcript_segments)} segments created for chunk UUID: {audio_chunk_id}")
             
         except Exception as e:
-            print(f"❌ Speaker mapping failed for chunk {audio_chunk_id}: {str(e)}")
+            print(f"❌ Speaker mapping failed for chunk UUID: {audio_chunk_id}: {str(e)}")
             raise e
     
     def get_audio_chunk_with_transcript(self, audio_chunk_id: str) -> Optional[AudioChunk]:
@@ -69,7 +69,7 @@ class AudioSpeakerMapper:
             chunk = self.db.query(AudioChunk).filter(AudioChunk.id == audio_chunk_id).first()
             return chunk
         except Exception as e:
-            print(f"❌ Error getting audio chunk {audio_chunk_id}: {str(e)}")
+            print(f"❌ Error getting audio chunk UUID: {audio_chunk_id}: {str(e)}")
             return None
     
     def find_speaker_events_for_chunk(self, chunk: AudioChunk) -> List[SpeakerEvent]:
@@ -281,7 +281,7 @@ class AudioSpeakerMapper:
             self.db.commit()
             self.db.refresh(speaker_transcript)
             
-            print(f"💾 Speaker transcript saved: {segment['speaker_name']} - \"{segment['transcript_text'][:50]}...\" (confidence: {segment['confidence_score']:.2f})")
+            print(f"💾 Speaker transcript saved (confidence: {segment['confidence_score']:.2f})")
             
         except Exception as e:
             self.db.rollback()

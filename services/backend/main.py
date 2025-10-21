@@ -18,7 +18,7 @@ from app.bot_runner import bot_runner_manager
 # Create FastAPI app
 app = FastAPI(
     title="AI Meeting Notetaker",
-    description="Minimal MVP for meeting audio capture",
+    description="Intelligent note-taking for meetings",
     version="2.0.0"
 )
 
@@ -43,8 +43,7 @@ app.include_router(embedded_router, tags=["Embedded App"])
 async def startup_event():
     """Create database tables on startup"""
     print("🚀 Starting AI Meeting Notetaker...")
-    create_tables()
-    print("✅ Database tables created/verified")
+    create_tables()  # Handles concurrent initialization gracefully
     print("📦 Bot-runner will start on-demand when first meeting is joined")
 
 
@@ -59,11 +58,11 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     return {
-        "message": "AI Meeting Notetaker", 
+        "message": "AI Space Notetaker", 
         "version": "2.0.0",
         "docs": "/docs"
     }
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8080, reload=True)

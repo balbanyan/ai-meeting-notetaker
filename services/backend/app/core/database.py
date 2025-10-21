@@ -23,5 +23,23 @@ def get_db():
 
 
 def create_tables():
-    """Create all tables"""
-    Base.metadata.create_all(bind=engine)
+    """
+    Create all tables (handles concurrent creation gracefully)
+    
+    This function is cloud-native and handles race conditions that occur when
+    multiple container instances start simultaneously (e.g., during Cloud Run deployment).
+    It's safe to call multiple times - if tables exist, they're skipped.
+    """
+    try:
+        Base.metadata.create_all(bind=engine, checkfirst=True)
+        print("✅ Database tables created/verified")
+    except Exception as e:
+        error_msg = str(e).lower()
+        # Ignore "already exists" errors from concurrent startups
+        # This happens when multiple Cloud Run instances start simultaneously
+        if "already exists" in error_msg or "duplicate key" in error_msg:
+            print(f"⚠️  Database objects already exist (concurrent startup or restart) - continuing...")
+        else:
+            # Re-raise other errors (connection issues, permissions, etc.)
+            print(f"❌ Database error: {str(e)}")
+            raise

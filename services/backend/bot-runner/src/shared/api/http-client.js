@@ -68,11 +68,11 @@ class BackendClient {
       });
       
       const maxChunkId = response.data.max_chunk_id;
-      console.log(`📊 Meeting chunk count - Meeting: ${meetingId}, Max chunk ID: ${maxChunkId}`);
+      console.log(`📊 Meeting chunk count - Max chunk ID: ${maxChunkId}`);
       return maxChunkId;
       
     } catch (error) {
-      console.error(`❌ Failed to get chunk count for meeting ${meetingId}:`, error.response?.data || error.message);
+      console.error(`❌ Failed to get chunk count:`, error.response?.data || error.message);
       // Return 0 if there's an error (start from 1)
       return 0;
     }

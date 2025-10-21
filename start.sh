@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# AI Meeting Notetaker - Startup Script
+# AI Space Notetaker - Startup Script
 # Note: Bot-runner is now embedded and starts automatically with the backend
 
-echo "🚀 Starting AI Meeting Notetaker..."
+echo "🚀 Starting AI Space Notetaker..."
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -54,7 +54,7 @@ trap cleanup SIGINT SIGTERM
 
 echo "📦 Starting Backend Service (with embedded bot-runner)..."
 cd services/backend
-PYTHONPATH=. python -m uvicorn main:app --reload --port 8000 &
+PYTHONPATH=. python -m uvicorn main:app --reload --port 8080 &
 BACKEND_PID=$!
 cd ../..
 
@@ -63,9 +63,9 @@ sleep 3
 
 echo ""
 echo "✅ Backend started successfully!"
-echo "📊 Backend API: http://localhost:8000"
-echo "📚 API Docs: http://localhost:8000/docs"
-echo "🔧 Health Check: http://localhost:8000/health"
+echo "📊 Backend API: http://localhost:8080"
+echo "📚 API Docs: http://localhost:8080/docs"
+echo "🔧 Health Check: http://localhost:8080/health"
 echo ""
 echo "🤖 Bot Runner: Embedded (will start automatically on first meeting join)"
 echo "   - Bot Runner API: http://localhost:3001 (after first meeting join)"

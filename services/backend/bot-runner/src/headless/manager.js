@@ -144,7 +144,7 @@ class HeadlessRunner {
           startTime: new Date().toISOString()
         });
         
-        console.log(`✅ Meeting joined successfully: ${meetingId}`);
+        console.log(`✅ Meeting joined successfully`);
         
         res.json({ 
           success: true, 
@@ -175,7 +175,7 @@ class HeadlessRunner {
           });
         }
         
-        console.log(`📞 Leave meeting request: ${meetingId}`);
+        console.log(`📞 Leave meeting request received`);
         
         if (this.activeMeetings.has(meetingId)) {
           const { page, webexClient } = this.activeMeetings.get(meetingId);
@@ -185,7 +185,7 @@ class HeadlessRunner {
           await page.close();
           this.activeMeetings.delete(meetingId);
           
-          console.log(`✅ Meeting left successfully: ${meetingId}`);
+          console.log(`✅ Meeting left successfully`);
           
           res.json({ 
             success: true, 
@@ -272,7 +272,7 @@ class HeadlessRunner {
       
       // Close all active meetings
       for (const [meetingId, { page }] of this.activeMeetings) {
-        console.log(`📞 Closing meeting: ${meetingId}`);
+        console.log(`📞 Closing active meeting`);
         await page.close();
       }
       this.activeMeetings.clear();

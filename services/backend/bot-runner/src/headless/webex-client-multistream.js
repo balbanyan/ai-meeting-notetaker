@@ -536,7 +536,7 @@ class MultistreamWebexClient {
         }
         
         // New speaker detected
-        console.log(`🗣️ Speaker change detected: ${detectedSpeakerId}`);
+        console.log(`🗣️ Speaker change detected`);
         
         // Clear any existing debounce timer
         if (window.speakerDebounceTimer) {
@@ -557,7 +557,7 @@ class MultistreamWebexClient {
       
       // Process confirmed speaker event
       window.processSpeakerEvent = function(speakerId, startTime) {
-        console.log(`✅ Speaker confirmed: ${speakerId}`);
+        console.log(`✅ Speaker confirmed`);
         
         try {
           // Get member name if available

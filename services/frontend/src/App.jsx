@@ -151,7 +151,7 @@ function App() {
     return (
       <div className="container">
         <div className="error-card">
-          <h2>⚠️ Error</h2>
+          <h2>Error</h2>
           <p>{error}</p>
         </div>
       </div>
@@ -161,7 +161,7 @@ function App() {
   return (
     <div className="container">
       <header>
-        <h1>🤖 AI Meeting Notetaker</h1>
+        <h1>AI Space Notetaker</h1>
         <p className="tagline">Add intelligent note-taking to your meeting</p>
       </header>
 
@@ -212,22 +212,22 @@ function App() {
           {joining ? (
             <>
               <div className="button-spinner"></div>
-              {loadingMessage}
+              <span className="loading-text">{loadingMessage}</span>
             </>
           ) : (
-            '🤖 Add Bot to Meeting'
+            'Add Bot to Meeting'
           )}
         </button>
 
         {success && (
           <div className="success-message">
-            ✅ Bot successfully added to meeting! It will join shortly.
+            Bot successfully added to meeting! It will join shortly.
           </div>
         )}
 
         {error && meetingData && (
           <div className="error-message">
-            ❌ {error}
+            {error}
           </div>
         )}
       </div>

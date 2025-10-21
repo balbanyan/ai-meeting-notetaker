@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Meeting Notetaker - Test Version</title>
+    <style>
+        /* Dark Theme with Green/Yellow Color Schema */
+        :root {
+            /* Background colors */
+            --bg-primary: #001008;
+            --bg-secondary: #00180C;
+            --bg-tertiary: #002018;
+            
+            /* Text colors */
+            --text-primary: #F4FCA8;
+            --text-secondary: #60BC94;
+            
+            /* Accent colors */
+            --accent-primary: #00604C;
+            --accent-hover: #004838;
+            --accent-light: #60BC94;
+            
+            /* Border colors */
+            --border: #004838;
+            --border-light: rgba(96, 188, 148, 0.1);
+            
+            /* Status colors */
+            --success: #60BC94;
+            --warning: #F4FCA8;
+            --error: #F4FCA8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 2px solid var(--border);
+        }
+
+        header h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .tagline {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        .test-mode-badge {
+            display: inline-block;
+            background-color: rgba(244, 252, 168, 0.1);
+            color: var(--warning);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            margin-top: 1rem;
+            border: 1px solid rgba(244, 252, 168, 0.3);
+        }
+
+        .form-section {
+            background-color: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+        }
+
+        .form-section h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .input-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .input-group label .required {
+            color: var(--warning);
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: inherit;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: var(--accent-light);
+            box-shadow: 0 0 0 3px rgba(96, 188, 148, 0.1);
+        }
+
+        .input-field::placeholder {
+            color: rgba(96, 188, 148, 0.4);
+        }
+
+        .input-field.mono {
+            font-family: 'Monaco', 'Menlo', monospace;
+        }
+
+        .help-text {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: rgba(96, 188, 148, 0.6);
+        }
+
+        .button-group {
+            text-align: center;
+            margin-top: 2rem;
+        }
+
+        .primary-button {
+            background-color: var(--accent-primary);
+            color: var(--text-primary);
+            border: none;
+            padding: 1rem 2rem;
+            font-size: 1.125rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-width: 220px;
+        }
+
+        .primary-button:hover:not(:disabled) {
+            background-color: var(--accent-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 96, 76, 0.3);
+        }
+
+        .primary-button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .primary-button:disabled {
+            background-color: rgba(0, 96, 76, 0.3);
+            cursor: not-allowed;
+            color: rgba(244, 252, 168, 0.3);
+        }
+
+        .spinner {
+            display: inline-block;
+            border: 3px solid rgba(244, 252, 168, 0.3);
+            border-top: 3px solid var(--text-primary);
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 0.8s linear infinite;
+            margin-left: 0.5rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .message {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 8px;
+            font-weight: 500;
+            display: none;
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        .success-message {
+            background-color: rgba(96, 188, 148, 0.1);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+
+        .error-message {
+            background-color: rgba(244, 252, 168, 0.1);
+            border: 1px solid rgba(244, 252, 168, 0.3);
+            color: var(--error);
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border);
+            color: rgba(96, 188, 148, 0.7);
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 AI Meeting Notetaker</h1>
+            <p class="tagline">Add an AI bot to transcribe and take notes</p>
+            <div class="test-mode-badge">🧪 STANDALONE TEST VERSION</div>
+        </header>
+
+        <form id="testForm">
+            <div class="form-section">
+                <h2>Meeting Information</h2>
+                
+                <div class="input-group">
+                    <label for="meetingId">Meeting ID <span class="required">*</span></label>
+                    <input 
+                        type="text" 
+                        id="meetingId" 
+                        class="input-field mono" 
+                        placeholder="f263ccfdfbc24c99aef5e5ddec3bf80f"
+                        value="f263ccfdfbc24c99aef5e5ddec3bf80f"
+                        required
+                    />
+                    <p class="help-text">Webex meeting identifier</p>
+                </div>
+
+                <div class="input-group">
+                    <label for="meetingTitle">Meeting Title <span class="required">*</span></label>
+                    <input 
+                        type="text" 
+                        id="meetingTitle" 
+                        class="input-field" 
+                        placeholder="Team Standup"
+                        value="Test Meeting"
+                        required
+                    />
+                </div>
+
+                <div class="input-group">
+                    <label for="conferenceId">Conference ID</label>
+                    <input 
+                        type="text" 
+                        id="conferenceId" 
+                        class="input-field mono" 
+                        placeholder="123-456-789"
+                    />
+                    <p class="help-text">Optional: Conference/Session ID</p>
+                </div>
+
+                <div class="input-group">
+                    <label for="meetingUrl">Meeting URL <span class="required">*</span></label>
+                    <input 
+                        type="url" 
+                        id="meetingUrl" 
+                        class="input-field mono" 
+                        placeholder="https://meet.webex.com/..."
+                        required
+                    />
+                    <p class="help-text">Full Webex meeting join URL</p>
+                </div>
+
+                <div class="input-group">
+                    <label for="startTime">Start Time</label>
+                    <input 
+                        type="datetime-local" 
+                        id="startTime" 
+                        class="input-field"
+                    />
+                </div>
+
+                <div class="input-group">
+                    <label for="endTime">End Time</label>
+                    <input 
+                        type="datetime-local" 
+                        id="endTime" 
+                        class="input-field"
+                    />
+                </div>
+
+                <div class="input-group">
+                    <label for="meetingType">Meeting Type</label>
+                    <select id="meetingType" class="input-field">
+                        <option value="meeting">Meeting</option>
+                        <option value="scheduled">Scheduled Meeting</option>
+                        <option value="instant">Instant Meeting</option>
+                        <option value="recurring">Recurring Meeting</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button type="submit" class="primary-button" id="submitBtn">
+                    <span id="btnText">🚀 Add AI Bot to Meeting</span>
+                    <span id="btnSpinner" class="spinner" style="display: none;"></span>
+                </button>
+            </div>
+
+            <div id="successMessage" class="message success-message"></div>
+            <div id="errorMessage" class="message error-message"></div>
+        </form>
+
+        <footer>
+            <p>This is a standalone test version. No Webex SDK required.</p>
+            <p>Backend API: http://localhost:8000/embedded/register-and-join</p>
+        </footer>
+    </div>
+
+    <script>
+        // Funny loading messages
+        const loadingMessages = [
+            "Teaching robot to look busy during long presentations...",
+            "AI is learning to distinguish 'let's circle back' from 'no'...",
+            "Initializing 'Can you see my screen?' response system...",
+            "Activating enterprise-grade note-taking algorithms...",
+            "Bot is clearing its virtual throat...",
+            "Bot is practicing its 'you're on mute' detection...",
+            "Downloading corporate buzzword dictionary...",
+            "Bot is joining fashionably late...",
+            "Bot is learning the art of the awkward silence...",
+            "Bot is learning to interpret 'Let's take this offline'...",
+            "AI is learning to smile through technical difficulties...",
+            "AI is learning the optimal delay before saying 'Can everyone see my screen?'...",
+            "Bot is wondering if this meeting could've been an email...",
+            "Teaching bot to say 'Good question' while Googling furiously..."
+        ];
+
+        // Get random loading message
+        function getRandomLoadingMessage() {
+            return loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
+        }
+
+        // Set default times to now and 1 hour from now
+        const now = new Date();
+        const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
+        
+        document.getElementById('startTime').value = now.toISOString().slice(0, 16);
+        document.getElementById('endTime').value = oneHourLater.toISOString().slice(0, 16);
+
+        // Form submission handler
+        document.getElementById('testForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const btnText = document.getElementById('btnText');
+            const btnSpinner = document.getElementById('btnSpinner');
+            const successMessage = document.getElementById('successMessage');
+            const errorMessage = document.getElementById('errorMessage');
+            
+            // Hide previous messages
+            successMessage.classList.remove('show');
+            errorMessage.classList.remove('show');
+            
+            // Disable button and show spinner with random funny message
+            submitBtn.disabled = true;
+            btnText.textContent = getRandomLoadingMessage();
+            btnSpinner.style.display = 'inline-block';
+            
+            // Cycle through messages every 3 seconds
+            const messageInterval = setInterval(() => {
+                btnText.textContent = getRandomLoadingMessage();
+            }, 3000);
+            
+            try {
+                // Gather form data
+                const formData = {
+                    meeting_id: document.getElementById('meetingId').value,
+                    meeting_title: document.getElementById('meetingTitle').value,
+                    conference_id: document.getElementById('conferenceId').value || '',
+                    meeting_url: document.getElementById('meetingUrl').value,
+                    start_time: document.getElementById('startTime').value 
+                        ? new Date(document.getElementById('startTime').value).toISOString()
+                        : new Date().toISOString(),
+                    end_time: document.getElementById('endTime').value
+                        ? new Date(document.getElementById('endTime').value).toISOString()
+                        : new Date(Date.now() + 3600000).toISOString(),
+                    meeting_type: document.getElementById('meetingType').value
+                };
+                
+                console.log('📤 Sending request:', formData);
+                
+                // Make API call to backend
+                const response = await fetch('http://localhost:8000/embedded/register-and-join', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+                
+                const data = await response.json();
+                console.log('📥 Response:', data);
+                
+                if (response.ok) {
+                    successMessage.textContent = `✅ ${data.message || 'Bot successfully joined the meeting!'}`;
+                    successMessage.classList.add('show');
+                } else {
+                    throw new Error(data.detail || 'Failed to add bot to meeting');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error:', error);
+                errorMessage.textContent = `❌ Error: ${error.message}`;
+                errorMessage.classList.add('show');
+            } finally {
+                // Clear the message cycling interval
+                clearInterval(messageInterval);
+                
+                // Re-enable button and hide spinner
+                submitBtn.disabled = false;
+                btnText.textContent = '🚀 Add AI Bot to Meeting';
+                btnSpinner.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
+

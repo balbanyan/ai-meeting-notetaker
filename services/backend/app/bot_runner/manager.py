@@ -96,9 +96,9 @@ class BotRunnerManager:
                 ["node", "src/index.js", "--headless"],
                 cwd=str(self.bot_runner_dir),
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout for easier capture
                 text=True,
-                bufsize=1,  # Line buffered
+                bufsize=0,  # Unbuffered for immediate output
                 env={**os.environ}  # Inherit environment variables
             )
             
@@ -114,6 +114,7 @@ class BotRunnerManager:
                 return True
             else:
                 print("❌ Bot-runner started but not responding to health checks")
+                print(f"⚠️ Process poll status: {self.process.poll()}")
                 self._print_process_output()
                 self.stop()
                 return False
@@ -166,21 +167,32 @@ class BotRunnerManager:
     def _print_process_output(self) -> None:
         """Print recent stdout/stderr from the process for debugging"""
         if self.process is None:
+            print("⚠️ No process to read output from")
             return
         
         try:
-            # Try to read any available output (non-blocking)
+            # Read all available output
             if self.process.stdout:
-                stdout = self.process.stdout.read()
-                if stdout:
-                    print("📋 Bot-runner stdout:")
-                    print(stdout)
-            
-            if self.process.stderr:
-                stderr = self.process.stderr.read()
-                if stderr:
-                    print("📋 Bot-runner stderr:")
-                    print(stderr)
+                try:
+                    # Set non-blocking
+                    import fcntl
+                    import os
+                    fd = self.process.stdout.fileno()
+                    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+                    fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+                    
+                    stdout = self.process.stdout.read()
+                    if stdout:
+                        print("📋 Bot-runner output:")
+                        print(stdout)
+                    else:
+                        print("📋 Bot-runner output: (empty)")
+                except:
+                    # If non-blocking fails, try blocking read with timeout
+                    print("📋 Attempting to read output (this might hang)...")
+                    stdout = self.process.stdout.readline()
+                    if stdout:
+                        print(f"📋 Bot-runner output: {stdout}")
         except Exception as e:
             print(f"⚠️ Could not read process output: {e}")
 

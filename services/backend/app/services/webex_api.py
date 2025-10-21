@@ -88,7 +88,7 @@ class WebexMeetingsAPI:
                 
                 if response.status_code == 200:
                     meeting_data = response.json()
-                    print(f"✅ Retrieved meeting details for ID: {meeting_id}")
+                    print(f"✅ Retrieved meeting details from Webex API")
                     return meeting_data
                 else:
                     print(f"❌ Get Meeting API error: {response.status_code} - {response.text}")
@@ -132,7 +132,7 @@ class WebexMeetingsAPI:
                     if items:
                         return items[0]  # Return first meeting
                     else:
-                        print(f"⚠️ No meeting found for link: {meeting_link}")
+                        print(f"⚠️ No meeting found for provided link")
                         return None
                 else:
                     print(f"❌ List Meetings API error: {response.status_code} - {response.text}")
@@ -238,7 +238,7 @@ class WebexMeetingsAPI:
                     
                     print(f"✅ Retrieved {len(participant_emails)} participant emails")
                     if host_email:
-                        print(f"   Host identified: {host_email}")
+                        print(f"   Host identified")
                     
                     return {
                         "participant_emails": participant_emails,

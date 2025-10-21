@@ -50,8 +50,6 @@ async def register_and_join_meeting(
     """
     try:
         print(f"📱 EMBEDDED APP - Register and Join Request")
-        print(f"   Meeting ID: {request.meeting_id}")
-        print(f"   Title: {request.meeting_title}")
         
         # Initialize Webex API client
         from app.services.webex_api import WebexMeetingsAPI
@@ -64,17 +62,17 @@ async def register_and_join_meeting(
         
         # Use meeting URL directly from frontend
         meeting_url = request.meeting_url
-        print(f"📍 Using meeting URL from frontend: {meeting_url}")
+        print(f"📍 Using meeting URL from frontend")
         
         # Get participant emails from Webex API (optional)
-        print(f"🌐 Fetching participants for meeting {request.meeting_id}...")
+        print(f"🌐 Fetching participants for meeting...")
         participant_data = await webex_api.get_meeting_participants_with_host(request.meeting_id)
         participant_emails = participant_data.get("participant_emails", [])
         host_email = participant_data.get("host_email")
         
         print(f"✅ Found {len(participant_emails)} participants")
         if host_email:
-            print(f"   Host: {host_email}")
+            print(f"   Host identified")
         
         # Parse datetime strings
         scheduled_start = None

@@ -84,7 +84,7 @@ async def save_audio_chunk(
         elif audio_data[:4] == b'RIFF':  # WAV signature
             format_info = ", Format: WAV"
             
-        print(f"💾 CHUNK SAVED - Chunk #{chunk_count}, ID: {chunk_id}, Size: {len(audio_data)} bytes{format_info}")
+        print(f"💾 CHUNK SAVED - Chunk #{chunk_count}, UUID: {chunk_id}, Size: {len(audio_data)} bytes{format_info}")
         
         # Trigger background transcription (Immediate Processing)
         from app.services.transcription import transcribe_chunk_async

@@ -127,7 +127,7 @@ async def fetch_and_register_meeting(
     4. Return meeting UUID and last chunk ID
     """
     try:
-        print(f"📋 FETCH AND REGISTER - URL: {request.meeting_url[:50]}...")
+        print(f"📋 FETCH AND REGISTER - Processing meeting URL")
         
         # Initialize Webex API client with Service App credentials or personal token
         from app.services.webex_api import WebexMeetingsAPI
@@ -147,7 +147,7 @@ async def fetch_and_register_meeting(
             raise HTTPException(status_code=404, detail="Meeting not found in Webex")
         
         webex_meeting_id = metadata["webex_meeting_id"]
-        print(f"✅ Metadata fetched - webex_meeting_id: {webex_meeting_id}")
+        print(f"✅ Metadata fetched from Webex API")
         
         # Check if meeting already exists (bot rejoining)
         existing_meeting = db.query(Meeting).filter(
@@ -174,7 +174,7 @@ async def fetch_and_register_meeting(
             ).scalar()
             last_chunk_id = max_chunk_id if max_chunk_id is not None else 0
             
-            print(f"✅ Meeting reactivated - last_chunk_id: {last_chunk_id}")
+            print(f"✅ Meeting reactivated - UUID: {existing_meeting.id}, last_chunk_id: {last_chunk_id}")
             
             return FetchAndRegisterResponse(
                 meeting_uuid=str(existing_meeting.id),

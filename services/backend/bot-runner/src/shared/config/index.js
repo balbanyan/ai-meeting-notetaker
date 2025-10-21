@@ -18,7 +18,7 @@ const config = {
   
   // Backend Configuration
   backend: {
-    apiUrl: process.env.BACKEND_API_URL || 'http://localhost:8000',
+    apiUrl: process.env.BACKEND_API_URL || 'http://localhost:8080',
   },
   
   // Audio Configuration (10-second chunks)

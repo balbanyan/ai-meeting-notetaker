@@ -1,6 +1,6 @@
 // API client for backend communication
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080'
 
 /**
  * Register meeting and trigger bot join
