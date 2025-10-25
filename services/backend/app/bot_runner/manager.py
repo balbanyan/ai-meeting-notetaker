@@ -31,8 +31,8 @@ class BotRunnerManager:
             
         self.process: Optional[subprocess.Popen] = None
         self.bot_runner_url = "http://localhost:3001"
-        self.startup_wait_seconds = 5
-        self.health_check_timeout = 2.0
+        self.startup_wait_seconds = 15  # Increased for Puppeteer browser launch
+        self.health_check_timeout = 5.0  # Increased for initial health check
         
         # Determine bot-runner directory path (relative to backend/app/)
         backend_dir = Path(__file__).parent.parent.parent
@@ -104,20 +104,33 @@ class BotRunnerManager:
             
             print(f"📦 Bot-runner process started (PID: {self.process.pid})")
             
-            # Wait for bot-runner to be ready
-            print(f"⏳ Waiting {self.startup_wait_seconds}s for bot-runner to initialize...")
-            time.sleep(self.startup_wait_seconds)
+            # Wait for bot-runner to be ready with retry logic
+            print(f"⏳ Waiting up to {self.startup_wait_seconds}s for bot-runner to initialize...")
+            max_attempts = self.startup_wait_seconds  # Try every second
             
-            # Verify it's running
-            if self.is_running():
-                print("✅ Bot-runner is ready and responding")
-                return True
-            else:
-                print("❌ Bot-runner started but not responding to health checks")
-                print(f"⚠️ Process poll status: {self.process.poll()}")
-                self._print_process_output()
-                self.stop()
-                return False
+            for attempt in range(max_attempts):
+                time.sleep(1)
+                
+                # Check if process crashed
+                if self.process.poll() is not None:
+                    print(f"❌ Bot-runner process crashed with code {self.process.returncode}")
+                    self._print_process_output()
+                    return False
+                
+                # Check if API is responding
+                if self.is_running():
+                    print(f"✅ Bot-runner is ready and responding (took {attempt + 1}s)")
+                    return True
+                    
+                if attempt % 3 == 0 and attempt > 0:
+                    print(f"⏳ Still waiting... ({attempt}/{max_attempts}s)")
+            
+            # Timeout - not responding
+            print("❌ Bot-runner started but not responding to health checks after timeout")
+            print(f"⚠️ Process poll status: {self.process.poll()}")
+            self._print_process_output()
+            self.stop()
+            return False
                 
         except FileNotFoundError as e:
             print(f"❌ Bot-runner startup failed: {e}")

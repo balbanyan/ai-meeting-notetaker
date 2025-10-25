@@ -42,16 +42,17 @@ class MultistreamWebexClient {
   // MAIN WORKFLOW
   // ============================================================================
 
-  async joinMeeting(meetingUrl) {
+  async joinMeeting(meetingUrl, meetingUuid, hostEmail = null) {
     try {
       this.logger('🚀 Starting headless multistream meeting join...', 'info');
       this.meetingUrl = meetingUrl;
+      this.meetingUuid = meetingUuid;  // Passed from embedded app via backend
+      this.hostEmail = hostEmail;  // Passed from embedded app
       
       // Test backend connection
       await this.testBackendConnection();
 
-      // Fetch meeting metadata from Webex and register with backend
-      await this.fetchAndRegisterMeeting(meetingUrl);
+      // Registration already done by embedded app - skip backend call
 
       // Set up browser environment
       await this.setupBrowserEnvironment();
@@ -87,30 +88,6 @@ class MultistreamWebexClient {
         error: error.message
       };
     }
-  }
-
-  /**
-   * Fetch meeting metadata and register with backend
-   * Backend handles all Webex API calls
-   */
-  async fetchAndRegisterMeeting(meetingUrl) {
-    this.logger('📋 Fetching and registering meeting via backend...', 'info');
-    
-    // Backend does everything: fetch from Webex APIs + register in DB
-    const registration = await this.backendClient.fetchAndRegisterMeeting(meetingUrl);
-    
-    // Store response data
-    this.meetingUuid = registration.meeting_uuid;
-    this.webexMeetingId = registration.webex_meeting_id;
-    this.hostEmail = registration.host_email;
-    
-    this.logger(`✅ Meeting registered - UUID: ${this.meetingUuid}`, 'success');
-    
-    if (registration.last_chunk_id > 0) {
-      this.logger(`📊 Continuing from chunk #${registration.last_chunk_id + 1}`, 'info');
-    }
-    
-    return registration;
   }
 
   async setupBrowserEnvironment() {

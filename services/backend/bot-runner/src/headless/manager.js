@@ -95,7 +95,7 @@ class HeadlessRunner {
     // Join meeting endpoint - supports both legacy and multistream
     app.post('/join', async (req, res) => {
       try {
-        const { meetingUrl, hostEmail, enableMultistream } = req.body;
+        const { meetingUrl, meetingUuid, hostEmail, enableMultistream } = req.body;
         
         if (!meetingUrl) {
           return res.status(400).json({ 
@@ -109,6 +109,9 @@ class HeadlessRunner {
         const clientType = useMultistream ? 'multistream' : 'legacy';
         
         console.log(`📞 Join meeting request received (${clientType} mode)`);
+        if (meetingUuid) {
+          console.log(`📋 Meeting UUID provided: ${meetingUuid} (embedded app workflow)`);
+        }
         
         // Create new page for this meeting
         const page = await this.browser.newPage();
@@ -132,7 +135,14 @@ class HeadlessRunner {
         console.log(`🎯 Using ${clientType} Webex client`);
         
         // Join the meeting
-        const result = await webexClient.joinMeeting(meetingUrl);
+        // If meetingUuid provided (embedded app workflow), pass it to multistream client
+        let result;
+        if (useMultistream && meetingUuid) {
+          result = await webexClient.joinMeeting(meetingUrl, meetingUuid, hostEmail);
+        } else {
+          // Legacy flow - client will fetch and register itself
+          result = await webexClient.joinMeeting(meetingUrl);
+        }
         
         // Store meeting session
         const meetingId = result.meetingId;

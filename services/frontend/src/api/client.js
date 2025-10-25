@@ -8,7 +8,7 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080'
  * @returns {Promise<Object>} Response from backend
  */
 export async function registerAndJoinMeeting(meetingData) {
-  const response = await fetch(`${BACKEND_URL}/embedded/register-and-join`, {
+  const response = await fetch(`${BACKEND_URL}/meetings/register-and-join`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

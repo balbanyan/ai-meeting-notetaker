@@ -2,11 +2,10 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 import uuid
 import httpx
-import asyncio
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.auth import verify_bot_token
@@ -16,91 +15,225 @@ from app.bot_runner import bot_runner_manager
 
 router = APIRouter()
 
+# If needed I can add a workflow that starts with the web link not the meeting ID (Using the "List Meetings By An Admin" API)
 
-class JoinMeetingRequest(BaseModel):
-    meeting_url: str
-    host_name: str = None
+# ============================================================================
+# PRODUCTION ENDPOINT - Embedded App Workflow
+# ============================================================================
 
 
-class JoinMeetingResponse(BaseModel):
-    meeting_id: str
+class RegisterAndJoinRequest(BaseModel):
+    meeting_id: str  # Webex meeting ID from SDK
+    enable_multistream: Optional[bool] = None  # Optional: True for multistream, False for legacy, None for default
+
+
+class RegisterAndJoinResponse(BaseModel):
+    meeting_uuid: str
+    webex_meeting_id: str
     status: str
     message: str
 
 
-@router.post("/meetings/join", response_model=JoinMeetingResponse)
-async def join_meeting(request: JoinMeetingRequest):
-    """Trigger bot to join a meeting via headless bot-runner"""
+@router.post("/meetings/register-and-join", response_model=RegisterAndJoinResponse)
+async def register_and_join_meeting(
+    request: RegisterAndJoinRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Register meeting from embedded app and trigger bot join.
+    
+    Main production workflow:
+    1. Receive meeting_id from Webex Embedded App frontend
+    2. Call get_complete_meeting_data() to retrieve all metadata from Webex APIs:
+       - GET /meetings/{meetingId} (admin) → metadata, meeting_number, host_email, times
+       - GET /meetings?meetingNumber&hostEmail → webLink (after getting host_email)
+       - GET /meeting-invitees → participant list (parallel with webLink)
+    3. Create/update meeting record in database
+    4. Trigger bot join via bot-runner with API-retrieved webLink + meetingUuid
+    5. Return success response
+    """
     try:
-        print(f"🚀 JOIN REQUEST received")
+        print(f"📱 REGISTER AND JOIN - Meeting ID: {request.meeting_id}")
+        
+        # Initialize Webex API client
+        from app.services.webex_api import WebexMeetingsAPI
+        webex_api = WebexMeetingsAPI(
+            client_id=settings.webex_client_id,
+            client_secret=settings.webex_client_secret,
+            refresh_token=settings.webex_refresh_token,
+            personal_token=settings.webex_personal_access_token
+        )
+        
+        # Get complete meeting data from Webex APIs
+        print(f"🌐 Fetching complete meeting data from Webex APIs...")
+        meeting_data = await webex_api.get_complete_meeting_data(request.meeting_id)
+        
+        # Extract data from API response
+        meeting_link = meeting_data["meeting_link"]
+        meeting_number = meeting_data["meeting_number"]
+        host_email = meeting_data["host_email"]
+        participant_emails = meeting_data["participant_emails"]
+        scheduled_type = meeting_data["scheduled_type"]
+        
+        # Parse datetime strings
+        scheduled_start = None
+        scheduled_end = None
+        try:
+            if meeting_data.get("scheduled_start_time"):
+                scheduled_start = datetime.fromisoformat(meeting_data["scheduled_start_time"].replace('Z', '+00:00'))
+        except (ValueError, AttributeError) as e:
+            print(f"⚠️ Could not parse start_time: {e}")
+        
+        try:
+            if meeting_data.get("scheduled_end_time"):
+                scheduled_end = datetime.fromisoformat(meeting_data["scheduled_end_time"].replace('Z', '+00:00'))
+        except (ValueError, AttributeError) as e:
+            print(f"⚠️ Could not parse end_time: {e}")
+        
+        # Determine if personal room meeting
+        is_personal_room = scheduled_type == "personalRoomMeeting"
+        
+        # Check if meeting already exists
+        existing_meeting = db.query(Meeting).filter(
+            Meeting.webex_meeting_id == request.meeting_id
+        ).first()
+        
+        if existing_meeting:
+            # Update existing meeting
+            print(f"🔄 Meeting exists - updating (UUID: {existing_meeting.id})")
+            
+            existing_meeting.is_active = True
+            existing_meeting.actual_join_time = datetime.utcnow()
+            existing_meeting.participant_emails = participant_emails
+            existing_meeting.host_email = host_email
+            existing_meeting.meeting_link = meeting_link
+            existing_meeting.meeting_number = meeting_number
+            existing_meeting.scheduled_type = scheduled_type
+            existing_meeting.is_personal_room = is_personal_room
+            
+            # Update scheduled times if provided
+            if scheduled_start:
+                existing_meeting.scheduled_start_time = scheduled_start
+            if scheduled_end:
+                existing_meeting.scheduled_end_time = scheduled_end
+            
+            # Update meeting type if provided
+            if meeting_data.get("meeting_type"):
+                existing_meeting.meeting_type = meeting_data["meeting_type"]
+            
+            db.commit()
+            db.refresh(existing_meeting)
+            
+            meeting_uuid = str(existing_meeting.id)
+        else:
+            # Create new meeting record
+            print(f"🆕 Creating new meeting record")
+            
+            new_meeting = Meeting(
+                webex_meeting_id=request.meeting_id,
+                meeting_number=meeting_number,
+                meeting_link=meeting_link,
+                host_email=host_email,
+                participant_emails=participant_emails,
+                scheduled_start_time=scheduled_start,
+                scheduled_end_time=scheduled_end,
+                actual_join_time=datetime.utcnow(),
+                is_active=True,
+                is_personal_room=is_personal_room,
+                meeting_type=meeting_data.get("meeting_type", "meeting"),
+                scheduled_type=scheduled_type
+            )
+            
+            db.add(new_meeting)
+            db.commit()
+            db.refresh(new_meeting)
+            
+            meeting_uuid = str(new_meeting.id)
+            print(f"✅ Meeting created - UUID: {meeting_uuid}")
+        
+        # Trigger bot join via bot-runner
+        print(f"🤖 Triggering bot join with API-retrieved webLink...")
         
         # Ensure bot-runner subprocess is running (start on-demand)
         if not bot_runner_manager.ensure_running():
             raise HTTPException(
-                status_code=503, 
+                status_code=503,
                 detail="Bot-runner service failed to start"
             )
         
-        # Call the headless bot-runner API
         bot_runner_url = f"{settings.bot_runner_url}/join"
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                bot_runner_url,
-                json={"meetingUrl": request.meeting_url},
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if response.status_code == 200:
-                bot_response = response.json()
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                payload = {
+                    "meetingUrl": meeting_link,  # Use API-retrieved webLink
+                    "meetingUuid": meeting_uuid,  # Pass meeting UUID from database
+                    "hostEmail": host_email  # Pass host email from API
+                }
                 
-                if bot_response.get("success"):
-                    meeting_id = bot_response.get("meetingId", request.meeting_url)
-                    
-                    print(f"✅ Bot successfully joined meeting")
-                    
-                    return JoinMeetingResponse(
-                        meeting_id=meeting_id,
-                        status="joined",
-                        message="Bot successfully joined the meeting"
-                    )
-                else:
-                    error_msg = bot_response.get("error", "Unknown error from bot-runner")
-                    print(f"❌ Bot failed to join meeting: {error_msg}")
-                    raise HTTPException(status_code=500, detail=f"Bot failed to join: {error_msg}")
-            else:
-                print(f"❌ Bot-runner API error: {response.status_code} - {response.text}")
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"Bot-runner API error: {response.status_code}"
+                # Add enableMultistream if specified
+                if request.enable_multistream is not None:
+                    payload["enableMultistream"] = request.enable_multistream
+                
+                bot_response = await client.post(
+                    bot_runner_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
                 )
+                
+                if bot_response.status_code == 200:
+                    bot_data = bot_response.json()
+                    
+                    if bot_data.get("success"):
+                        print(f"✅ Bot successfully triggered to join")
+                        
+                        return RegisterAndJoinResponse(
+                            meeting_uuid=meeting_uuid,
+                            webex_meeting_id=request.meeting_id,
+                            status="success",
+                            message="Meeting registered and bot join triggered successfully"
+                        )
+                    else:
+                        error_msg = bot_data.get("error", "Unknown error from bot-runner")
+                        print(f"❌ Bot failed to join: {error_msg}")
+                        raise HTTPException(status_code=500, detail=f"Bot failed to join: {error_msg}")
+                else:
+                    print(f"❌ Bot-runner API error: {bot_response.status_code}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Bot-runner API error: {bot_response.status_code}"
+                    )
         
-    except httpx.TimeoutException:
-        print("❌ Bot-runner API timeout")
-        raise HTTPException(status_code=504, detail="Bot-runner API timeout")
-    except httpx.ConnectError:
-        print("❌ Bot-runner API connection failed - is headless bot running?")
-        raise HTTPException(status_code=503, detail="Bot-runner service unavailable")
+        except httpx.TimeoutException:
+            print("❌ Bot-runner API timeout")
+            raise HTTPException(status_code=504, detail="Bot-runner service timeout")
+        except httpx.ConnectError:
+            print("❌ Bot-runner connection failed")
+            raise HTTPException(status_code=503, detail="Bot-runner service unavailable")
+    
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"❌ Unexpected error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to join meeting: {str(e)}")
+        db.rollback()
+        print(f"❌ REGISTER AND JOIN FAILED - {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to register meeting: {str(e)}")
 
 
 # ============================================================================
-# MEETING REGISTRATION AND MANAGEMENT
+# TESTING ENDPOINT - Bot Runner Testing
 # ============================================================================
 
-class FetchAndRegisterRequest(BaseModel):
+class TestJoinRequest(BaseModel):
     meeting_url: str
+    enable_multistream: Optional[bool] = None  # Optional: True for multistream, False for legacy, None for default
 
 
-class FetchAndRegisterResponse(BaseModel):
+class TestJoinResponse(BaseModel):
     meeting_uuid: str
-    webex_meeting_id: str
-    meeting_number: Optional[str]
-    host_email: Optional[str]
-    is_new: bool
-    last_chunk_id: int
+    meeting_url: str
+    status: str
     message: str
 
 
@@ -110,132 +243,131 @@ class UpdateMeetingStatusRequest(BaseModel):
     actual_leave_time: Optional[str] = None
 
 
-@router.post("/meetings/fetch-and-register", response_model=FetchAndRegisterResponse)
-async def fetch_and_register_meeting(
-    request: FetchAndRegisterRequest,
-    db: Session = Depends(get_db),
-    token: str = Depends(verify_bot_token)
+@router.post("/meetings/test-join", response_model=TestJoinResponse)
+async def test_join_meeting(
+    request: TestJoinRequest,
+    db: Session = Depends(get_db)
 ):
     """
-    Fetch meeting metadata from Webex APIs and register in database.
-    Returns meeting UUID for bot-runner to use.
+    Test endpoint to trigger bot-runner without Webex API calls.
     
-    Workflow:
-    1. Call Webex List Meetings API to get meeting details
-    2. Call Webex List Participants API to get participant emails
-    3. Create or update meeting record in database
-    4. Return meeting UUID and last chunk ID
+    This endpoint:
+    - Creates a minimal meeting record in DB (for chunk/speaker references)
+    - Triggers bot-runner directly with meeting URL
+    - Does NOT call Webex APIs (no metadata fetching)
+    - Still processes audio chunks and speaker events normally
+    
+    Perfect for testing bot-runner without valid Webex credentials.
     """
     try:
-        print(f"📋 FETCH AND REGISTER - Processing meeting URL")
+        print(f"🧪 TEST JOIN - Creating minimal meeting record for testing")
         
-        # Initialize Webex API client with Service App credentials or personal token
-        from app.services.webex_api import WebexMeetingsAPI
-        webex_api = WebexMeetingsAPI(
-            client_id=settings.webex_client_id,
-            client_secret=settings.webex_client_secret,
-            refresh_token=settings.webex_refresh_token,
-            personal_token=settings.webex_personal_access_token  # For testing
-        )
+        # Create minimal meeting record without Webex API calls
+        # Use meeting URL hash as a simple webex_meeting_id substitute
+        test_meeting_id = f"test_{hash(request.meeting_url) % 1000000}"
         
-        # Fetch complete meeting metadata from Webex APIs
-        print(f"🌐 Calling Webex APIs to fetch meeting metadata...")
-        metadata = await webex_api.get_full_meeting_metadata(request.meeting_url)
-        
-        if not metadata or not metadata.get("webex_meeting_id"):
-            print(f"❌ Could not fetch meeting details from Webex API")
-            raise HTTPException(status_code=404, detail="Meeting not found in Webex")
-        
-        webex_meeting_id = metadata["webex_meeting_id"]
-        print(f"✅ Metadata fetched from Webex API")
-        
-        # Check if meeting already exists (bot rejoining)
+        # Check if this test meeting already exists
         existing_meeting = db.query(Meeting).filter(
-            Meeting.webex_meeting_id == webex_meeting_id
+            Meeting.webex_meeting_id == test_meeting_id
         ).first()
         
         if existing_meeting:
-            # Meeting exists - bot is rejoining
-            print(f"🔄 Meeting exists - reactivating (UUID: {existing_meeting.id})")
-            
-            # Update meeting status
+            print(f"🔄 Test meeting exists - reactivating (UUID: {existing_meeting.id})")
             existing_meeting.is_active = True
             existing_meeting.actual_join_time = datetime.utcnow()
-            
-            # Update participant list
-            existing_meeting.participant_emails = metadata.get("participant_emails", [])
-            
             db.commit()
             db.refresh(existing_meeting)
-            
-            # Get last chunk ID for this meeting
-            max_chunk_id = db.query(func.max(AudioChunk.chunk_id)).filter(
-                AudioChunk.meeting_id == existing_meeting.id
-            ).scalar()
-            last_chunk_id = max_chunk_id if max_chunk_id is not None else 0
-            
-            print(f"✅ Meeting reactivated - UUID: {existing_meeting.id}, last_chunk_id: {last_chunk_id}")
-            
-            return FetchAndRegisterResponse(
-                meeting_uuid=str(existing_meeting.id),
-                webex_meeting_id=existing_meeting.webex_meeting_id,
-                meeting_number=existing_meeting.meeting_number,
-                host_email=existing_meeting.host_email,
-                is_new=False,
-                last_chunk_id=last_chunk_id,
-                message="Meeting reactivated - chunk counting will continue"
-            )
-        
+            meeting_uuid = str(existing_meeting.id)
         else:
-            # New meeting - create record
-            print(f"🆕 New meeting - creating record")
-            
-            # Parse datetime strings if provided
-            scheduled_start = None
-            scheduled_end = None
-            if metadata.get("scheduled_start_time"):
-                scheduled_start = datetime.fromisoformat(metadata["scheduled_start_time"].replace('Z', '+00:00'))
-            if metadata.get("scheduled_end_time"):
-                scheduled_end = datetime.fromisoformat(metadata["scheduled_end_time"].replace('Z', '+00:00'))
-            
-            # Create new meeting record
+            # Create new minimal meeting record
+            print(f"🆕 Creating minimal test meeting record")
             new_meeting = Meeting(
-                webex_meeting_id=metadata["webex_meeting_id"],
-                meeting_number=metadata.get("meeting_number"),
+                webex_meeting_id=test_meeting_id,
                 meeting_link=request.meeting_url,
-                host_email=metadata.get("host_email"),
-                participant_emails=metadata.get("participant_emails", []),
-                scheduled_start_time=scheduled_start,
-                scheduled_end_time=scheduled_end,
+                meeting_number="TEST",
+                host_email="test@example.com",
+                participant_emails=[],
                 actual_join_time=datetime.utcnow(),
                 is_active=True,
-                is_personal_room=metadata.get("is_personal_room", False),
-                meeting_type=metadata.get("meeting_type"),
-                scheduled_type=metadata.get("scheduled_type")
+                is_personal_room=False,
+                meeting_type="test",
+                scheduled_type="test"
             )
             
             db.add(new_meeting)
             db.commit()
             db.refresh(new_meeting)
-            
-            print(f"✅ Meeting created - UUID: {new_meeting.id}")
-            
-            return FetchAndRegisterResponse(
-                meeting_uuid=str(new_meeting.id),
-                webex_meeting_id=new_meeting.webex_meeting_id,
-                meeting_number=new_meeting.meeting_number,
-                host_email=new_meeting.host_email,
-                is_new=True,
-                last_chunk_id=0,
-                message="New meeting registered - chunk counting starts from 1"
+            meeting_uuid = str(new_meeting.id)
+            print(f"✅ Test meeting created - UUID: {meeting_uuid}")
+        
+        # Trigger bot-runner
+        print(f"🤖 Triggering bot-runner for testing...")
+        
+        # Ensure bot-runner subprocess is running
+        if not bot_runner_manager.ensure_running():
+            raise HTTPException(
+                status_code=503,
+                detail="Bot-runner service failed to start"
             )
+        
+        bot_runner_url = f"{settings.bot_runner_url}/join"
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                payload = {
+                    "meetingUrl": request.meeting_url,
+                    "meetingUuid": meeting_uuid,  # Pass UUID so chunks/speakers work
+                    "hostEmail": "test@example.com"
+                }
+                
+                # Add enableMultistream if specified
+                if request.enable_multistream is not None:
+                    payload["enableMultistream"] = request.enable_multistream
+                
+                bot_response = await client.post(
+                    bot_runner_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if bot_response.status_code == 200:
+                    bot_data = bot_response.json()
+                    
+                    if bot_data.get("success"):
+                        print(f"✅ Bot successfully triggered for testing")
+                        
+                        return TestJoinResponse(
+                            meeting_uuid=meeting_uuid,
+                            meeting_url=request.meeting_url,
+                            status="success",
+                            message="Test meeting created and bot join triggered (no Webex API calls)"
+                        )
+                    else:
+                        error_msg = bot_data.get("error", "Unknown error from bot-runner")
+                        print(f"❌ Bot failed to join: {error_msg}")
+                        raise HTTPException(status_code=500, detail=f"Bot failed to join: {error_msg}")
+                else:
+                    print(f"❌ Bot-runner API error: {bot_response.status_code}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Bot-runner API error: {bot_response.status_code}"
+                    )
+        
+        except httpx.TimeoutException:
+            print("❌ Bot-runner API timeout")
+            raise HTTPException(status_code=504, detail="Bot-runner service timeout")
+        except httpx.ConnectError:
+            print("❌ Bot-runner connection failed")
+            raise HTTPException(status_code=503, detail="Bot-runner service unavailable")
     
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
-        print(f"❌ FETCH AND REGISTER FAILED - {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch and register meeting: {str(e)}")
+        print(f"❌ TEST JOIN FAILED - {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to create test meeting: {str(e)}")
 
 
 @router.patch("/meetings/{meeting_uuid}/status")

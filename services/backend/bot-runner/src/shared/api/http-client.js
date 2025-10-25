@@ -106,36 +106,6 @@ class BackendClient {
   }
 
   /**
-   * Fetch meeting metadata from Webex and register with backend
-   * Backend handles all Webex API calls and returns meeting UUID
-   */
-  async fetchAndRegisterMeeting(meetingUrl) {
-    try {
-      console.log(`📋 Fetching and registering meeting with backend...`);
-      
-      const response = await axios.post(
-        `${this.baseURL}/meetings/fetch-and-register`,
-        { meeting_url: meetingUrl },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      const { meeting_uuid, webex_meeting_id, is_new, last_chunk_id } = response.data;
-      console.log(`✅ Meeting registered - UUID: ${meeting_uuid}, Is New: ${is_new}, Last Chunk: ${last_chunk_id}`);
-      
-      return response.data;
-
-    } catch (error) {
-      console.error(`❌ FETCH AND REGISTER FAILED`, error.response?.data || error.message);
-      throw error;
-    }
-  }
-
-  /**
    * Update meeting status (active/inactive)
    */
   async updateMeetingStatus(meetingUuid, statusData) {

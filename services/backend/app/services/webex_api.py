@@ -1,4 +1,5 @@
 import httpx
+import asyncio
 from typing import Optional, Dict, List
 from urllib.parse import quote
 
@@ -29,7 +30,6 @@ class WebexMeetingsAPI:
             # Strip whitespace/newlines that might have been accidentally added
             cleaned_token = self.personal_token.strip()
             print("✅ Using personal access token from config")
-            print(f"🔍 Token length: {len(cleaned_token)} chars, starts with: {cleaned_token[:20]}...")
             return cleaned_token
         
         # If we already have a cached access token, use it
@@ -67,19 +67,28 @@ class WebexMeetingsAPI:
                 print(f"❌ OAuth token generation failed: {response.status_code} - {error_detail}")
                 raise Exception(f"Failed to get access token: {response.status_code} - {error_detail}")
     
-    async def get_meeting_by_id(self, meeting_id: str) -> Optional[Dict]:
+    async def get_meeting_by_id_admin(self, meeting_id: str) -> Optional[Dict]:
         """
-        Call GET /meetings/{meetingId}
-        Returns meeting details including webLink, meetingNumber, hostEmail, etc.
+        Call GET /admin/meetings/{meetingId} (Admin API)
+        Returns complete meeting details including metadata.
         
-        API Reference: https://developer.webex.com/docs/api/v1/meetings/get-a-meeting
+        API Reference: https://developer.webex.com/meeting/docs/api/v1/meetings/get-a-meeting-by-an-admin
+        
+        Returns:
+            {
+                "meeting_number": str,
+                "host_email": str,
+                "start": str (ISO 8601),
+                "end": str (ISO 8601),
+                "scheduled_type": str  # "meeting", "webinar", "personalRoomMeeting"
+            }
         """
         try:
             access_token = await self._get_access_token()
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
-                    f"{self.base_url}/meetings/{meeting_id}",
+                    f"{self.base_url}/admin/meetings/{meeting_id}",
                     headers={
                         "Authorization": f"Bearer {access_token}",
                         "Content-Type": "application/json"
@@ -88,35 +97,49 @@ class WebexMeetingsAPI:
                 
                 if response.status_code == 200:
                     meeting_data = response.json()
-                    print(f"✅ Retrieved meeting details from Webex API")
-                    return meeting_data
+                    print(f"✅ Retrieved meeting details from Admin API")
+                    
+                    # Extract relevant fields
+                    return {
+                        "meeting_number": meeting_data.get("meetingNumber"),
+                        "host_email": meeting_data.get("hostEmail"),
+                        "start": meeting_data.get("start"),
+                        "end": meeting_data.get("end"),
+                        "scheduled_type": meeting_data.get("scheduledType"),
+                        "title": meeting_data.get("title"),
+                        "meeting_type": meeting_data.get("meetingType")
+                    }
                 else:
-                    print(f"❌ Get Meeting API error: {response.status_code} - {response.text}")
+                    print(f"❌ Get Meeting Admin API error: {response.status_code} - {response.text}")
                     return None
                     
         except Exception as e:
-            print(f"❌ Failed to get meeting by ID: {str(e)}")
+            print(f"❌ Failed to get meeting by ID (admin): {str(e)}")
             return None
     
-    async def get_meeting_by_link(self, meeting_link: str) -> Optional[Dict]:
+    async def get_meeting_weblink(self, meeting_number: str, host_email: str) -> Optional[str]:
         """
-        Call GET /meetings?webLink={encoded_link}&meetingType=scheduledMeeting
-        Returns meeting details including id, hostEmail, start, end, scheduledType
+        Call GET /meetings?meetingNumber={num}&hostEmail={email}
+        Returns the meeting webLink.
         
-        API Reference: https://developer.webex.com/meeting/docs/api/v1/meetings/list-meetings
+        API Reference: https://developer.webex.com/docs/api/v1/meetings/list-meetings
+        
+        Args:
+            meeting_number: Meeting number from admin API
+            host_email: Host email from admin API
+            
+        Returns:
+            webLink (str) - The canonical meeting URL
         """
         try:
             access_token = await self._get_access_token()
-            
-            # URL-encode the meeting link
-            encoded_link = quote(meeting_link, safe='')
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{self.base_url}/meetings",
                     params={
-                        "webLink": encoded_link,
-                        # Removed meetingType filter to support all meeting types
+                        "meetingNumber": meeting_number,
+                        "hostEmail": host_email,
                         "max": 1  # We only need the first result
                     },
                     headers={
@@ -130,34 +153,44 @@ class WebexMeetingsAPI:
                     items = data.get("items", [])
                     
                     if items:
-                        return items[0]  # Return first meeting
+                        weblink = items[0].get("webLink")
+                        print(f"✅ Retrieved webLink from List Meetings API")
+                        return weblink
                     else:
-                        print(f"⚠️ No meeting found for provided link")
+                        print(f"⚠️ No meeting found for meetingNumber={meeting_number}, hostEmail={host_email}")
                         return None
                 else:
                     print(f"❌ List Meetings API error: {response.status_code} - {response.text}")
                     return None
                     
         except Exception as e:
-            print(f"❌ Failed to get meeting by link: {str(e)}")
+            print(f"❌ Failed to get meeting weblink: {str(e)}")
             return None
     
-    async def get_meeting_participants(self, webex_meeting_id: str) -> List[str]:
+    async def get_meeting_invitees(self, meeting_id: str, host_email: str) -> List[str]:
         """
-        Call GET /meetingParticipants?meetingId={webex_meeting_id}
-        Returns list of participant emails
+        Call GET /meeting-invitees?meetingId={id}&hostEmail={email}
+        Returns list of invitee emails.
         
-        API Reference: https://developer.webex.com/meeting/docs/api/v1/meeting-participants/list-meeting-participants
+        API Reference: https://developer.webex.com/docs/api/v1/meeting-invitees/list-meeting-invitees
+        
+        Args:
+            meeting_id: Webex meeting ID
+            host_email: Host email from admin API
+            
+        Returns:
+            List of invitee email addresses
         """
         try:
             access_token = await self._get_access_token()
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
-                    f"{self.base_url}/meetingParticipants",
+                    f"{self.base_url}/meeting-invitees",
                     params={
-                        "meetingId": webex_meeting_id,
-                        "max": 100  # Get up to 100 participants
+                        "meetingId": meeting_id,
+                        "hostEmail": host_email,
+                        "max": 100  # Get up to 100 invitees
                     },
                     headers={
                         "Authorization": f"Bearer {access_token}",
@@ -169,153 +202,94 @@ class WebexMeetingsAPI:
                     data = response.json()
                     items = data.get("items", [])
                     
-                    # Extract emails from participants
-                    participant_emails = []
-                    for participant in items:
-                        email = participant.get("email") or participant.get("hostEmail")
+                    # Extract emails from invitees
+                    invitee_emails = []
+                    for invitee in items:
+                        email = invitee.get("email")
                         if email:
-                            participant_emails.append(email)
+                            invitee_emails.append(email)
                     
-                    print(f"✅ Retrieved {len(participant_emails)} participant emails")
-                    return participant_emails
+                    print(f"✅ Retrieved {len(invitee_emails)} invitee emails")
+                    return invitee_emails
                 else:
-                    print(f"❌ List Participants API error: {response.status_code} - {response.text}")
+                    print(f"⚠️ List Invitees API error: {response.status_code} - {response.text}")
+                    # Don't fail completely - return empty list
                     return []
                     
         except Exception as e:
-            print(f"❌ Failed to get meeting participants: {str(e)}")
+            print(f"⚠️ Failed to get meeting invitees (continuing with empty list): {str(e)}")
             return []
     
-    async def get_meeting_participants_with_host(self, webex_meeting_id: str) -> Dict:
+    async def get_complete_meeting_data(self, meeting_id: str) -> Dict:
         """
-        Call GET /meetingParticipants?meetingId={webex_meeting_id}
-        Returns dict with participant emails and host email
-        
-        Returns:
-            {
-                "participant_emails": List[str],
-                "host_email": Optional[str]
-            }
-        
-        API Reference: https://developer.webex.com/meeting/docs/api/v1/meeting-participants/list-meeting-participants
-        """
-        try:
-            access_token = await self._get_access_token()
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    f"{self.base_url}/meetingParticipants",
-                    params={
-                        "meetingId": webex_meeting_id,
-                        "max": 100  # Get up to 100 participants
-                    },
-                    headers={
-                        "Authorization": f"Bearer {access_token}",
-                        "Content-Type": "application/json"
-                    }
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    items = data.get("items", [])
-                    
-                    # Extract emails and identify host
-                    participant_emails = []
-                    host_email = None
-                    
-                    for participant in items:
-                        email = participant.get("email") or participant.get("hostEmail")
-                        if email:
-                            participant_emails.append(email)
-                            
-                            # Check if this participant is the host
-                            if participant.get("host") is True or participant.get("hostEmail"):
-                                host_email = email
-                    
-                    # If no host identified, use first participant
-                    if not host_email and participant_emails:
-                        host_email = participant_emails[0]
-                    
-                    print(f"✅ Retrieved {len(participant_emails)} participant emails")
-                    if host_email:
-                        print(f"   Host identified")
-                    
-                    return {
-                        "participant_emails": participant_emails,
-                        "host_email": host_email
-                    }
-                else:
-                    print(f"❌ List Participants API error: {response.status_code} - {response.text}")
-                    return {
-                        "participant_emails": [],
-                        "host_email": None
-                    }
-                    
-        except Exception as e:
-            print(f"❌ Failed to get meeting participants: {str(e)}")
-            return {
-                "participant_emails": [],
-                "host_email": None
-            }
-    
-    def extract_meeting_metadata(self, api_response: Dict) -> Dict:
-        """
-        Parse API response from get_meeting_by_link and extract relevant fields.
-        
-        Returns dict with:
-        - webex_meeting_id: Unique meeting ID from Webex
-        - meeting_number: User-friendly numeric ID
-        - host_email: Meeting host email
-        - scheduled_start_time: ISO 8601 datetime string
-        - scheduled_end_time: ISO 8601 datetime string
-        - is_personal_room: Boolean
-        - meeting_type: meeting/webinar
-        - scheduled_type: meeting/webinar/personalRoomMeeting
-        """
-        if not api_response:
-            return {}
-        
-        return {
-            "webex_meeting_id": api_response.get("id"),
-            "meeting_number": api_response.get("meetingNumber"),
-            "host_email": api_response.get("hostEmail"),
-            "scheduled_start_time": api_response.get("start"),
-            "scheduled_end_time": api_response.get("end"),
-            "is_personal_room": api_response.get("scheduledType") == "personalRoomMeeting",
-            "meeting_type": api_response.get("meetingType"),
-            "scheduled_type": api_response.get("scheduledType")
-        }
-    
-    async def get_full_meeting_metadata(self, meeting_link: str) -> Optional[Dict]:
-        """
-        Convenience method to get complete meeting metadata including participants.
+        Orchestration method that retrieves complete meeting data using 3 Webex APIs.
         
         Workflow:
-        1. Call get_meeting_by_link() to get meeting details (list_meetings API)
-        2. Extract webex_meeting_id
-        3. Call get_meeting_participants() to get participant emails (list_meeting_participants API)
-        4. Return combined metadata
+        1. GET /meetings/{meetingId} (Admin API) → metadata
+        2. GET /meetings?meetingNumber&hostEmail → webLink (parallel)
+        3. GET /meeting-invitees → participant list (parallel)
+        
+        Args:
+            meeting_id: Webex meeting ID from SDK
+            
+        Returns:
+            {
+                "webex_meeting_id": str,
+                "meeting_number": str,
+                "host_email": str,
+                "scheduled_start_time": str (ISO 8601),
+                "scheduled_end_time": str (ISO 8601),
+                "scheduled_type": str,
+                "meeting_link": str,
+                "participant_emails": List[str],
+                "title": str,
+                "meeting_type": str
+            }
         """
-        # Get meeting details
-        meeting_data = await self.get_meeting_by_link(meeting_link)
-        
-        if not meeting_data:
-            return None
-        
-        # Extract metadata
-        metadata = self.extract_meeting_metadata(meeting_data)
-        
-        # Get participants if we have a meeting ID (optional, may fail without proper scope)
-        webex_meeting_id = metadata.get("webex_meeting_id")
-        if webex_meeting_id:
-            try:
-                participant_emails = await self.get_meeting_participants(webex_meeting_id)
-                metadata["participant_emails"] = participant_emails
-            except Exception as e:
-                print(f"⚠️ Could not fetch participants (missing scope?): {str(e)}")
-                metadata["participant_emails"] = []  # Continue without participants
-        else:
-            metadata["participant_emails"] = []
-        
-        return metadata
+        try:
+            print(f"📋 Fetching complete meeting data for meeting_id: {meeting_id}")
+            
+            # Step 1: Get admin metadata
+            admin_data = await self.get_meeting_by_id_admin(meeting_id)
+            
+            if not admin_data:
+                raise Exception("Failed to retrieve meeting metadata from Admin API")
+            
+            meeting_number = admin_data.get("meeting_number")
+            host_email = admin_data.get("host_email")
+            
+            if not meeting_number or not host_email:
+                raise Exception(f"Missing required fields: meeting_number={meeting_number}, host_email={host_email}")
+            
+            # Steps 2 & 3: Parallel calls for webLink and invitees
+            print(f"🔄 Fetching webLink and invitees in parallel...")
+            weblink_task = self.get_meeting_weblink(meeting_number, host_email)
+            invitees_task = self.get_meeting_invitees(meeting_id, host_email)
+            
+            weblink, invitees = await asyncio.gather(weblink_task, invitees_task)
+            
+            if not weblink:
+                raise Exception("Failed to retrieve meeting webLink")
+            
+            # Return combined data
+            result = {
+                "webex_meeting_id": meeting_id,
+                "meeting_number": meeting_number,
+                "host_email": host_email,
+                "scheduled_start_time": admin_data.get("start"),
+                "scheduled_end_time": admin_data.get("end"),
+                "scheduled_type": admin_data.get("scheduled_type"),
+                "meeting_link": weblink,
+                "participant_emails": invitees,
+                "title": admin_data.get("title"),
+                "meeting_type": admin_data.get("meeting_type")
+            }
+            
+            print(f"✅ Complete meeting data retrieved successfully")
+            
+            return result
+            
+        except Exception as e:
+            print(f"❌ Failed to get complete meeting data: {str(e)}")
+            raise
 

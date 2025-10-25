@@ -45,6 +45,7 @@ body {
   max-width: 800px;
   margin: 0 auto;
   padding: 2rem 1.5rem;
+  position: relative;
 }
 
 /* Header */
@@ -66,17 +67,19 @@ header h1 {
   font-size: 1rem;
 }
 
-/* Test Mode Badge */
-.test-mode-badge {
-  display: inline-block;
-  background-color: rgba(244, 252, 168, 0.1);
+/* Dev Mode Badge */
+.dev-mode-badge {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background-color: rgba(244, 252, 168, 0.15);
   color: var(--warning);
   padding: 0.5rem 1rem;
   border-radius: 6px;
   font-size: 0.875rem;
   font-weight: 600;
-  margin-top: 1rem;
   border: 1px solid rgba(244, 252, 168, 0.3);
+  box-shadow: 0 2px 8px rgba(244, 252, 168, 0.1);
 }
 
 /* Loading State */
@@ -106,7 +109,59 @@ header h1 {
   100% { transform: rotate(360deg); }
 }
 
-/* Meeting Info */
+/* Dev Mode Input Section */
+.dev-input-section {
+  background-color: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  border: 2px solid rgba(244, 252, 168, 0.2);
+}
+
+.dev-input-section h2 {
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: var(--warning);
+}
+
+.dev-help-text {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+
+.meeting-id-input {
+  width: 100%;
+  padding: 0.875rem;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: 'Monaco', 'Menlo', monospace;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.meeting-id-input:focus {
+  outline: none;
+  border-color: var(--accent-light);
+  box-shadow: 0 0 0 3px rgba(96, 188, 148, 0.1);
+}
+
+.meeting-id-input:disabled {
+  background-color: rgba(0, 16, 8, 0.5);
+  cursor: not-allowed;
+  color: rgba(244, 252, 168, 0.4);
+  border-color: rgba(0, 72, 56, 0.5);
+}
+
+.meeting-id-input::placeholder {
+  color: rgba(96, 188, 148, 0.4);
+}
+
+/* Meeting Info (Production Mode) */
 .meeting-info {
   background-color: var(--bg-secondary);
   border-radius: 12px;

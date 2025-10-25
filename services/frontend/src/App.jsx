@@ -25,17 +25,29 @@ const getRandomLoadingMessage = () => {
 }
 
 function App() {
+  // Check if dev mode is enabled
+  const isDev = import.meta.env.VITE_DEV_MODE === 'true'
+  
   const [webexApp, setWebexApp] = useState(null)
   const [meetingData, setMeetingData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [joining, setJoining] = useState(false)
   const [success, setSuccess] = useState(false)
-  const [meetingUrl, setMeetingUrl] = useState('')
   const [loadingMessage, setLoadingMessage] = useState('')
+  
+  // Dev mode: Manual meeting ID input
+  const [manualMeetingId, setManualMeetingId] = useState('')
 
   useEffect(() => {
-    // Initialize Webex SDK
+    // DEV MODE: Skip Webex SDK initialization
+    if (isDev) {
+      console.log('🔧 Running in DEV MODE - Webex SDK disabled')
+      setLoading(false)
+      return
+    }
+    
+    // PRODUCTION MODE: Initialize Webex SDK
     const initializeWebex = async () => {
       try {
         // Wait for SDK to be available
@@ -80,16 +92,14 @@ function App() {
     }
 
     initializeWebex()
-  }, [])
+  }, [isDev])
 
   const handleAddBot = async () => {
-    if (!meetingData) {
-      setError('No meeting data available')
-      return
-    }
-
-    if (!meetingUrl || !meetingUrl.trim()) {
-      setError('Please enter a meeting URL')
+    // Get meeting ID based on mode
+    const meetingId = isDev ? manualMeetingId : meetingData?.id
+    
+    if (!meetingId) {
+      setError(isDev ? 'Please enter a meeting ID' : 'No meeting data available')
       return
     }
 
@@ -104,14 +114,9 @@ function App() {
     }, 5000)
 
     try {
-      // Send meeting data to backend with user-provided URL
+      // Send meeting ID to backend - it will fetch all metadata from Webex APIs
       const response = await registerAndJoinMeeting({
-        meeting_id: meetingData.id,
-        meeting_title: meetingData.title || 'Untitled Meeting',
-        start_time: new Date().toISOString(), // Current time as placeholder
-        end_time: new Date().toISOString(), // Current time as placeholder
-        meeting_type: 'meeting', // Default value
-        meeting_url: meetingUrl.trim() // User-provided meeting URL
+        meeting_id: meetingId
       })
 
       console.log('Bot join response:', response)
@@ -160,12 +165,38 @@ function App() {
 
   return (
     <div className="container">
+      {isDev && <div className="dev-mode-badge">🔧 DEV MODE</div>}
+      
       <header>
         <h1>AI Space Notetaker</h1>
         <p className="tagline">Add intelligent note-taking to your meeting</p>
       </header>
 
-      {meetingData && (
+      {/* DEV MODE: Manual meeting ID input */}
+      {isDev && (
+        <div className="dev-input-section">
+          <h2>Manual Meeting Setup</h2>
+          <p className="dev-help-text">
+            Enter a Webex meeting ID to trigger the bot join workflow.
+            Backend will fetch metadata from Webex APIs.
+          </p>
+          <div className="input-group">
+            <label htmlFor="meeting-id">Meeting ID:</label>
+            <input
+              id="meeting-id"
+              type="text"
+              className="meeting-id-input"
+              placeholder="e.g., abc123xyz456..."
+              value={manualMeetingId}
+              onChange={(e) => setManualMeetingId(e.target.value)}
+              disabled={joining}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* PRODUCTION MODE: Meeting info from Webex SDK */}
+      {!isDev && meetingData && (
         <div className="meeting-info">
           <h2>Meeting Information</h2>
           <div className="info-grid">
@@ -188,26 +219,10 @@ function App() {
       )}
 
       <div className="action-section">
-        <div className="input-group">
-          <label htmlFor="meeting-url">Meeting URL</label>
-          <input
-            id="meeting-url"
-            type="text"
-            className="meeting-url-input"
-            placeholder="https://meet.webex.com/..."
-            value={meetingUrl}
-            onChange={(e) => setMeetingUrl(e.target.value)}
-            disabled={joining || !meetingData}
-          />
-          <p className="help-text-small">
-            Enter the Webex meeting URL to allow the bot to join
-          </p>
-        </div>
-
         <button 
           className="primary-button" 
           onClick={handleAddBot}
-          disabled={joining || !meetingData || !meetingUrl.trim()}
+          disabled={joining || (!isDev && !meetingData) || (isDev && !manualMeetingId)}
         >
           {joining ? (
             <>
@@ -225,7 +240,7 @@ function App() {
           </div>
         )}
 
-        {error && meetingData && (
+        {error && (
           <div className="error-message">
             {error}
           </div>
@@ -234,8 +249,11 @@ function App() {
 
       <footer>
         <p className="help-text">
-          Click the button above to add the AI notetaker bot to this meeting.
-          The bot will capture audio and generate transcripts.
+          {isDev ? (
+            'Enter a Webex meeting ID above to test the bot workflow. The backend will fetch all meeting metadata.'
+          ) : (
+            'Click the button above to add the AI notetaker bot to this meeting. The bot will automatically join, capture audio, and generate transcripts.'
+          )}
         </p>
       </footer>
     </div>
