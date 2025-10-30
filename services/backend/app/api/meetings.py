@@ -6,6 +6,7 @@ from typing import Optional
 from datetime import datetime
 import uuid
 import httpx
+import asyncio
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.auth import verify_bot_token
@@ -14,6 +15,33 @@ from app.models.audio_chunk import AudioChunk
 from app.bot_runner import bot_runner_manager
 
 router = APIRouter()
+
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+async def wait_for_bot_runner_ready(max_wait_seconds: int = 20) -> bool:
+    """
+    Asynchronously wait for bot-runner to be ready (non-blocking).
+    
+    Returns True if bot-runner becomes ready within timeout, False otherwise.
+    """
+    print(f"⏳ Waiting for bot-runner to be ready (max {max_wait_seconds}s)...")
+    
+    for attempt in range(max_wait_seconds):
+        if bot_runner_manager.is_running():
+            print(f"✅ Bot-runner is ready (took {attempt + 1}s)")
+            return True
+        
+        # Async sleep to not block the event loop
+        await asyncio.sleep(1)
+        
+        if attempt % 3 == 0 and attempt > 0:
+            print(f"⏳ Still waiting for bot-runner... ({attempt}/{max_wait_seconds}s)")
+    
+    print(f"❌ Bot-runner did not become ready within {max_wait_seconds}s")
+    return False
 
 # If needed I can add a workflow that starts with the web link not the meeting ID (Using the "List Meetings By An Admin" API)
 
@@ -72,8 +100,8 @@ async def register_and_join_meeting(
         meeting_link = meeting_data["meeting_link"]
         meeting_number = meeting_data["meeting_number"]
         host_email = meeting_data["host_email"]
-        participant_emails = meeting_data["participant_emails"]
-        scheduled_type = meeting_data["scheduled_type"]
+        participant_emails = meeting_data.get("participant_emails", [])
+        cohost_emails = meeting_data.get("cohost_emails", [])
         
         # Parse datetime strings
         scheduled_start = None
@@ -90,9 +118,6 @@ async def register_and_join_meeting(
         except (ValueError, AttributeError) as e:
             print(f"⚠️ Could not parse end_time: {e}")
         
-        # Determine if personal room meeting
-        is_personal_room = scheduled_type == "personalRoomMeeting"
-        
         # Check if meeting already exists
         existing_meeting = db.query(Meeting).filter(
             Meeting.webex_meeting_id == request.meeting_id
@@ -105,11 +130,10 @@ async def register_and_join_meeting(
             existing_meeting.is_active = True
             existing_meeting.actual_join_time = datetime.utcnow()
             existing_meeting.participant_emails = participant_emails
+            existing_meeting.cohost_emails = cohost_emails
             existing_meeting.host_email = host_email
             existing_meeting.meeting_link = meeting_link
             existing_meeting.meeting_number = meeting_number
-            existing_meeting.scheduled_type = scheduled_type
-            existing_meeting.is_personal_room = is_personal_room
             
             # Update scheduled times if provided
             if scheduled_start:
@@ -135,13 +159,12 @@ async def register_and_join_meeting(
                 meeting_link=meeting_link,
                 host_email=host_email,
                 participant_emails=participant_emails,
+                cohost_emails=cohost_emails,
                 scheduled_start_time=scheduled_start,
                 scheduled_end_time=scheduled_end,
                 actual_join_time=datetime.utcnow(),
                 is_active=True,
-                is_personal_room=is_personal_room,
-                meeting_type=meeting_data.get("meeting_type", "meeting"),
-                scheduled_type=scheduled_type
+                meeting_type=meeting_data.get("meeting_type", "meeting")
             )
             
             db.add(new_meeting)
@@ -154,11 +177,20 @@ async def register_and_join_meeting(
         # Trigger bot join via bot-runner
         print(f"🤖 Triggering bot join with API-retrieved webLink...")
         
-        # Ensure bot-runner subprocess is running (start on-demand)
-        if not bot_runner_manager.ensure_running():
+        # Ensure bot-runner subprocess is running (start on-demand if needed)
+        if not bot_runner_manager.is_running():
+            print("🔄 Bot-runner not running, starting now...")
+            if not bot_runner_manager.start():
+                raise HTTPException(
+                    status_code=503, 
+                    detail="Bot-runner service failed to start"
+                )
+        
+        # Wait for bot-runner to be ready (async, non-blocking)
+        if not await wait_for_bot_runner_ready(max_wait_seconds=20):
             raise HTTPException(
                 status_code=503,
-                detail="Bot-runner service failed to start"
+                detail="Bot-runner service failed to become ready in time"
             )
         
         bot_runner_url = f"{settings.bot_runner_url}/join"
@@ -287,11 +319,10 @@ async def test_join_meeting(
                 meeting_number="TEST",
                 host_email="test@example.com",
                 participant_emails=[],
+                cohost_emails=[],
                 actual_join_time=datetime.utcnow(),
                 is_active=True,
-                is_personal_room=False,
-                meeting_type="test",
-                scheduled_type="test"
+                meeting_type="test"
             )
             
             db.add(new_meeting)
@@ -303,11 +334,20 @@ async def test_join_meeting(
         # Trigger bot-runner
         print(f"🤖 Triggering bot-runner for testing...")
         
-        # Ensure bot-runner subprocess is running
-        if not bot_runner_manager.ensure_running():
+        # Ensure bot-runner subprocess is running (start on-demand if needed)
+        if not bot_runner_manager.is_running():
+            print("🔄 Bot-runner not running, starting now...")
+            if not bot_runner_manager.start():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Bot-runner service failed to start"
+                )
+        
+        # Wait for bot-runner to be ready (async, non-blocking)
+        if not await wait_for_bot_runner_ready(max_wait_seconds=20):
             raise HTTPException(
                 status_code=503,
-                detail="Bot-runner service failed to start"
+                detail="Bot-runner service failed to become ready in time"
             )
         
         bot_runner_url = f"{settings.bot_runner_url}/join"

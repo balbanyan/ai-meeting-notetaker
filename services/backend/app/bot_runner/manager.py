@@ -70,7 +70,7 @@ class BotRunnerManager:
             return False
     
     def start(self) -> bool:
-        """Start the bot-runner subprocess"""
+        """Start the bot-runner subprocess (non-blocking, initializes in background)"""
         if self.is_running():
             print("✅ Bot-runner already running")
             return True
@@ -92,45 +92,25 @@ class BotRunnerManager:
             
             # Start Node.js process in headless mode
             # Use node directly to run src/index.js with --headless flag
+            # Don't capture stdout/stderr - let them print directly to parent console for GCP logging
             self.process = subprocess.Popen(
                 ["node", "src/index.js", "--headless"],
                 cwd=str(self.bot_runner_dir),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr into stdout for easier capture
-                text=True,
-                bufsize=0,  # Unbuffered for immediate output
                 env={**os.environ}  # Inherit environment variables
             )
             
             print(f"📦 Bot-runner process started (PID: {self.process.pid})")
+            print(f"⏳ Bot-runner will initialize in background (typically takes 5-10s)")
             
-            # Wait for bot-runner to be ready with retry logic
-            print(f"⏳ Waiting up to {self.startup_wait_seconds}s for bot-runner to initialize...")
-            max_attempts = self.startup_wait_seconds  # Try every second
+            # Quick check that process didn't immediately crash
+            time.sleep(0.5)
+            if self.process.poll() is not None:
+                print(f"❌ Bot-runner process crashed immediately with code {self.process.returncode}")
+                self._print_process_output()
+                return False
             
-            for attempt in range(max_attempts):
-                time.sleep(1)
-                
-                # Check if process crashed
-                if self.process.poll() is not None:
-                    print(f"❌ Bot-runner process crashed with code {self.process.returncode}")
-                    self._print_process_output()
-                    return False
-                
-                # Check if API is responding
-                if self.is_running():
-                    print(f"✅ Bot-runner is ready and responding (took {attempt + 1}s)")
-                    return True
-                    
-                if attempt % 3 == 0 and attempt > 0:
-                    print(f"⏳ Still waiting... ({attempt}/{max_attempts}s)")
-            
-            # Timeout - not responding
-            print("❌ Bot-runner started but not responding to health checks after timeout")
-            print(f"⚠️ Process poll status: {self.process.poll()}")
-            self._print_process_output()
-            self.stop()
-            return False
+            print("✅ Bot-runner subprocess started successfully")
+            return True
                 
         except FileNotFoundError as e:
             print(f"❌ Bot-runner startup failed: {e}")
@@ -178,36 +158,8 @@ class BotRunnerManager:
         return self.start()
     
     def _print_process_output(self) -> None:
-        """Print recent stdout/stderr from the process for debugging"""
-        if self.process is None:
-            print("⚠️ No process to read output from")
-            return
-        
-        try:
-            # Read all available output
-            if self.process.stdout:
-                try:
-                    # Set non-blocking
-                    import fcntl
-                    import os
-                    fd = self.process.stdout.fileno()
-                    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-                    fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-                    
-                    stdout = self.process.stdout.read()
-                    if stdout:
-                        print("📋 Bot-runner output:")
-                        print(stdout)
-                    else:
-                        print("📋 Bot-runner output: (empty)")
-                except:
-                    # If non-blocking fails, try blocking read with timeout
-                    print("📋 Attempting to read output (this might hang)...")
-                    stdout = self.process.stdout.readline()
-                    if stdout:
-                        print(f"📋 Bot-runner output: {stdout}")
-        except Exception as e:
-            print(f"⚠️ Could not read process output: {e}")
+        """Note: Bot-runner logs print directly to console (not captured)"""
+        print("📋 Bot-runner logs are printed directly to console (check GCP logs above)")
 
 
 # Global singleton instance

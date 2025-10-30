@@ -134,35 +134,62 @@ class HeadlessRunner {
           
         console.log(`🎯 Using ${clientType} Webex client`);
         
-        // Join the meeting
-        // If meetingUuid provided (embedded app workflow), pass it to multistream client
-        let result;
-        if (useMultistream && meetingUuid) {
-          result = await webexClient.joinMeeting(meetingUrl, meetingUuid, hostEmail);
-        } else {
-          // Legacy flow - client will fetch and register itself
-          result = await webexClient.joinMeeting(meetingUrl);
-        }
+        // Generate temporary meeting ID for tracking
+        const tempMeetingId = meetingUuid || `meeting_${Date.now()}`;
         
-        // Store meeting session
-        const meetingId = result.meetingId;
-        this.activeMeetings.set(meetingId, { 
-          page, 
-          webexClient, 
-          meetingUrl,
-          clientType,
-          startTime: new Date().toISOString()
-        });
-        
-        console.log(`✅ Meeting joined successfully`);
-        
+        // Respond immediately - join will happen in background
         res.json({ 
           success: true, 
-          meetingId,
-          hostEmail: result.hostEmail,
+          meetingId: tempMeetingId,
           clientType,
-          message: `Meeting joined successfully with ${clientType} client`
+          message: `Meeting join initiated with ${clientType} client`
         });
+        
+        // Join the meeting asynchronously (don't await - let it run in background)
+        // If meetingUuid provided (embedded app workflow), pass it to multistream client
+        (async () => {
+          try {
+            let result;
+            if (useMultistream && meetingUuid) {
+              result = await webexClient.joinMeeting(meetingUrl, meetingUuid, hostEmail);
+            } else {
+              // Legacy flow - client will fetch and register itself
+              result = await webexClient.joinMeeting(meetingUrl);
+            }
+            
+            // Check if join was actually successful
+            if (result && result.success !== false) {
+              // Store meeting session
+              const meetingId = result.meetingId || tempMeetingId;
+              this.activeMeetings.set(meetingId, { 
+                page, 
+                webexClient, 
+                meetingUrl,
+                clientType,
+                startTime: new Date().toISOString()
+              });
+              
+              console.log(`✅ Meeting joined successfully - ID: ${meetingId}`);
+            } else {
+              // Join failed - error already logged by client
+              console.error(`❌ Meeting join failed: ${result?.error || 'Unknown error'}`);
+              // Clean up page
+              try {
+                await page.close();
+              } catch (closeError) {
+                console.error('❌ Error closing page after failed join:', closeError);
+              }
+            }
+          } catch (error) {
+            console.error('❌ Background join error (exception):', error);
+            // Clean up page if join fails
+            try {
+              await page.close();
+            } catch (closeError) {
+              console.error('❌ Error closing page after failed join:', closeError);
+            }
+          }
+        })();
         
       } catch (error) {
         console.error('❌ Join meeting error:', error);

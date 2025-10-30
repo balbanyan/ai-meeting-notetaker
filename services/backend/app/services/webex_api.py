@@ -167,10 +167,10 @@ class WebexMeetingsAPI:
             print(f"❌ Failed to get meeting weblink: {str(e)}")
             return None
     
-    async def get_meeting_invitees(self, meeting_id: str, host_email: str) -> List[str]:
+    async def get_meeting_invitees(self, meeting_id: str, host_email: str) -> Dict:
         """
         Call GET /meeting-invitees?meetingId={id}&hostEmail={email}
-        Returns list of invitee emails.
+        Returns separate lists for participants and cohosts.
         
         API Reference: https://developer.webex.com/docs/api/v1/meeting-invitees/list-meeting-invitees
         
@@ -179,7 +179,9 @@ class WebexMeetingsAPI:
             host_email: Host email from admin API
             
         Returns:
-            List of invitee email addresses
+            Dict with:
+                - participant_emails: List of non-cohost invitees
+                - cohost_emails: List of cohost invitees
         """
         try:
             access_token = await self._get_access_token()
@@ -202,23 +204,39 @@ class WebexMeetingsAPI:
                     data = response.json()
                     items = data.get("items", [])
                     
-                    # Extract emails from invitees
-                    invitee_emails = []
+                    # Separate participants and cohosts
+                    participant_emails = []
+                    cohost_emails = []
+                    
                     for invitee in items:
                         email = invitee.get("email")
+                        is_cohost = invitee.get("coHost", False)
+                        
                         if email:
-                            invitee_emails.append(email)
+                            if is_cohost:
+                                cohost_emails.append(email)
+                            else:
+                                participant_emails.append(email)
                     
-                    print(f"✅ Retrieved {len(invitee_emails)} invitee emails")
-                    return invitee_emails
+                    print(f"✅ Retrieved {len(participant_emails)} participants, {len(cohost_emails)} cohosts")
+                    return {
+                        "participant_emails": participant_emails,
+                        "cohost_emails": cohost_emails
+                    }
                 else:
                     print(f"⚠️ List Invitees API error: {response.status_code} - {response.text}")
-                    # Don't fail completely - return empty list
-                    return []
+                    # Don't fail completely - return empty lists
+                    return {
+                        "participant_emails": [],
+                        "cohost_emails": []
+                    }
                     
         except Exception as e:
-            print(f"⚠️ Failed to get meeting invitees (continuing with empty list): {str(e)}")
-            return []
+            print(f"⚠️ Failed to get meeting invitees (continuing with empty lists): {str(e)}")
+            return {
+                "participant_emails": [],
+                "cohost_emails": []
+            }
     
     async def get_complete_meeting_data(self, meeting_id: str) -> Dict:
         """
@@ -278,14 +296,18 @@ class WebexMeetingsAPI:
                 "host_email": host_email,
                 "scheduled_start_time": admin_data.get("start"),
                 "scheduled_end_time": admin_data.get("end"),
-                "scheduled_type": admin_data.get("scheduled_type"),
                 "meeting_link": weblink,
-                "participant_emails": invitees,
+                "participant_emails": invitees.get("participant_emails", []),
+                "cohost_emails": invitees.get("cohost_emails", []),
                 "title": admin_data.get("title"),
                 "meeting_type": admin_data.get("meeting_type")
             }
             
             print(f"✅ Complete meeting data retrieved successfully")
+            print(f"   Meeting Number Length: {len(meeting_number)}")
+            print(f"   Host Length: {len(host_email)}")
+            print(f"   WebLink Length: {len(weblink)}..." if weblink else "   WebLink: None")
+            print(f"   Participants Length: {len(invitees.get('participant_emails', []))}, Cohosts Length: {len(invitees.get('cohost_emails', []))}")
             
             return result
             

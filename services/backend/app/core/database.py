@@ -43,3 +43,25 @@ def create_tables():
             # Re-raise other errors (connection issues, permissions, etc.)
             print(f"❌ Database error: {str(e)}")
             raise
+
+
+def reset_database():
+    """
+    Drop and recreate all tables - USE WITH CAUTION!
+    This will delete all data. Only use for development/schema changes.
+    """
+    try:
+        print("⚠️  Dropping all tables...")
+        Base.metadata.drop_all(bind=engine)
+        print("✅ All tables dropped")
+    except Exception as e:
+        print(f"⚠️  Error dropping tables (they may not exist): {str(e)}")
+        print("   Continuing to create tables...")
+    
+    try:
+        print("📦 Creating tables with new schema...")
+        Base.metadata.create_all(bind=engine)
+        print("✅ Tables created")
+    except Exception as e:
+        print(f"❌ Error creating tables: {str(e)}")
+        raise

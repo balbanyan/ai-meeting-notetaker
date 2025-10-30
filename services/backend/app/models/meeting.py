@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Boolean, DateTime, func, JSON
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 import uuid
 from app.core.database import Base
@@ -18,7 +18,8 @@ class Meeting(Base):
     
     # Meeting Details from List Meetings API
     host_email = Column(String(255), nullable=True, index=True)
-    participant_emails = Column(JSON, nullable=True)  # List of participant emails from List Meeting Participants API
+    participant_emails = Column(JSON, nullable=True)  # List of participant emails (non-cohosts only)
+    cohost_emails = Column(ARRAY(String), default=list)  # List of cohost emails (separate from participants)
     scheduled_start_time = Column(DateTime(timezone=True), nullable=True, index=True)
     scheduled_end_time = Column(DateTime(timezone=True), nullable=True)
     
@@ -28,9 +29,7 @@ class Meeting(Base):
     is_active = Column(Boolean, default=False, index=True)
     
     # Meeting Classification
-    is_personal_room = Column(Boolean, default=False, index=True)
     meeting_type = Column(String(50), nullable=True)  # meeting/webinar
-    scheduled_type = Column(String(50), nullable=True)  # meeting/webinar/personalRoomMeeting
     
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())

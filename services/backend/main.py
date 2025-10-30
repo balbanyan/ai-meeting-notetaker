@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import os
 
 # Import routers
 from app.api.health import router as health_router
@@ -9,7 +10,7 @@ from app.api.audio import router as audio_router
 from app.api.speaker_events import router as speaker_events_router
 
 # Import database setup
-from app.core.database import create_tables
+from app.core.database import create_tables, reset_database
 
 # Import bot-runner manager
 from app.bot_runner import bot_runner_manager
@@ -41,7 +42,14 @@ app.include_router(speaker_events_router, tags=["Speaker Events"])
 async def startup_event():
     """Create database tables on startup"""
     print("🚀 Starting AI Meeting Notetaker...")
-    create_tables()  # Handles concurrent initialization gracefully
+    
+    # Check if database reset is requested (for schema changes)
+    if os.getenv("RESET_DATABASE", "false").lower() == "true":
+        print("⚠️  RESET_DATABASE=true detected - dropping and recreating all tables")
+        reset_database()
+    else:
+        create_tables()  # Handles concurrent initialization gracefully
+    
     print("📦 Bot-runner will start on-demand when first meeting is joined")
 
 
