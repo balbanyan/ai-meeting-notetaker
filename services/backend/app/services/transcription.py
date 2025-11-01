@@ -14,12 +14,12 @@ class GroqWhisperService:
     """Simple service for transcribing audio using Groq Whisper API"""
     
     def __init__(self):
-        self.api_key = settings.whisper_groq_api
+        self.api_key = settings.groq_api_key
         self.base_url = settings.groq_api_base_url
         self.model = settings.whisper_model
         
         if not self.api_key:
-            logger.warning("WHISPER_GROQ_API not configured - transcription will be disabled")
+            logger.warning("GROQ_API_KEY not configured - transcription will be disabled")
     
     async def transcribe_audio(self, audio_data: bytes) -> Dict:
         """

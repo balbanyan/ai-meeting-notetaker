@@ -13,10 +13,13 @@ class Settings(BaseSettings):
     webex_refresh_token: str = ""  # Service App refresh token (90-day validity)
     webex_personal_access_token: str = ""  # Personal access token (for testing, overrides OAuth flow)
     
-    # Whisper Transcription Settings
-    whisper_groq_api: str = ""
+    # Groq API Settings (used for both Whisper transcription and LLM processing)
+    groq_api_key: str = ""
     whisper_model: str = "whisper-large-v3"
     groq_api_base_url: str = "https://api.groq.com/openai/v1"
+    
+    # External API Authentication
+    external_api_key: str = ""
     
     class Config:
         env_file = ".env"

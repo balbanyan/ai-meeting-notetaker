@@ -68,3 +68,4 @@ bot-runner.log
 *.tmp
 *.temp
 .cache/
+markdown-instructions/
