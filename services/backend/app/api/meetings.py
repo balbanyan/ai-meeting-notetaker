@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
@@ -14,7 +14,7 @@ from app.models.meeting import Meeting
 from app.models.audio_chunk import AudioChunk
 from app.models.speaker_transcript import SpeakerTranscript
 from app.bot_runner import bot_runner_manager
-from app.services.llm_processor import process_transcripts_with_llm
+from app.services.llm_processor import process_transcripts_with_llm, generate_meeting_summary
 
 router = APIRouter()
 
@@ -416,11 +416,13 @@ async def test_join_meeting(
 async def update_meeting_status(
     meeting_uuid: str,
     request: UpdateMeetingStatusRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     token: str = Depends(verify_bot_token)
 ):
     """
     Update meeting active status and join/leave times.
+    When is_active becomes False, triggers background task to generate meeting summary.
     """
     try:
         # Parse UUID
@@ -449,6 +451,14 @@ async def update_meeting_status(
         
         status_text = "active" if request.is_active else "inactive"
         print(f"✅ Meeting {meeting_uuid} marked as {status_text}")
+        
+        # Trigger meeting summary generation when bot leaves (is_active becomes False)
+        if not request.is_active:
+            print(f"🤖 Triggering background task to generate meeting summary for {meeting_uuid}")
+            # Create a new DB session for the background task
+            from app.core.database import SessionLocal
+            bg_db = SessionLocal()
+            background_tasks.add_task(generate_meeting_summary, uuid_obj, bg_db)
         
         return {"status": "updated", "message": f"Meeting marked as {status_text}"}
     

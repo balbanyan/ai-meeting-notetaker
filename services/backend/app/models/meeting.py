@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, func, JSON
+from sqlalchemy import Column, String, Boolean, DateTime, func, JSON, Text
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 import uuid
@@ -30,6 +30,9 @@ class Meeting(Base):
     
     # Meeting Classification
     meeting_type = Column(String(50), nullable=True)  # meeting/webinar
+    
+    # AI-Generated Content
+    meeting_summary = Column(Text, nullable=True)  # LLM-generated meeting summary (MoM)
     
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())

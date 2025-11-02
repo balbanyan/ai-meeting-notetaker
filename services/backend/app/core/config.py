@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     whisper_model: str = "whisper-large-v3"
     groq_api_base_url: str = "https://api.groq.com/openai/v1"
+    llm_model: str = "openai/gpt-oss-120b"  # LLM model for meeting summaries
     
     # External API Authentication
     external_api_key: str = ""
