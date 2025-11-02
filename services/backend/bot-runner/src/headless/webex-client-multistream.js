@@ -66,9 +66,6 @@ class MultistreamWebexClient {
       
       // Set up speaker event processing
       await this.setupSpeakerEventProcessing();
-      
-      // Start monitoring for browser close requests
-      this.startBrowserCloseMonitoring();
 
       this.logger('🎉 Multistream meeting joined successfully with headless client!', 'success');
       this.isInMeeting = true;
@@ -139,6 +136,17 @@ class MultistreamWebexClient {
     // Wait for Webex to be available
     await this.page.waitForFunction('typeof window.Webex !== "undefined"', { timeout: 15000 });
     
+    // Expose Node.js cleanup function to browser for direct event-driven cleanup
+    await this.page.exposeFunction('triggerNodeCleanup', async (reason, timestamp) => {
+      this.logger(`========================================`, 'warn');
+      this.logger(`🔴 CLEANUP CALLED FROM BROWSER`, 'warn');
+      this.logger(`Reason: ${reason}`, 'warn');
+      this.logger(`Timestamp: ${timestamp}`, 'warn');
+      this.logger(`========================================`, 'warn');
+      await this.cleanup();
+    });
+    this.logger('✅ Node.js cleanup function exposed to browser', 'success');
+    
     // Grant microphone permissions
     await this.grantMicrophonePermissions();
     
@@ -180,9 +188,6 @@ class MultistreamWebexClient {
         });
 
         console.log('✅ Webex SDK initialized with bot access token');
-        
-        // Browser close flag
-        window.shouldCloseBrowser = false;
         
         // Validate bot authentication
         console.log('🔐 Validating bot authentication...');
@@ -377,10 +382,20 @@ class MultistreamWebexClient {
           console.log(`📺 Screen sharing stopped by remote participant`);
         });
 
-        // Handle media streams stopping
+        // Handle media streams stopping - PRIMARY CLEANUP TRIGGER
         meeting.on('media:stopped', (media) => {
           console.log(`🔇 Meeting media stopped: ${media.type}`);
+          
           if (media.type === 'remoteAudio') {
+            const timestamp = new Date().toISOString();
+            console.log('========================================');
+            console.log('🔴 CLEANUP TRIGGER: remoteAudio stopped');
+            console.log('Timestamp:', timestamp);
+            console.log('This indicates meeting has ended or bot was removed');
+            console.log('Calling Node.js cleanup function directly...');
+            console.log('========================================');
+            
+            // Clean up audio resources
             window.webexAudioStream = null;
             
             // Stop and clean up MediaRecorder
@@ -401,23 +416,15 @@ class MultistreamWebexClient {
             
             // Clear chunk data
             window.audioChunkReady = null;
+            
+            // Directly trigger Node.js cleanup (instant, no polling!)
+            if (window.triggerNodeCleanup) {
+              window.triggerNodeCleanup('remoteAudio-stopped', timestamp)
+                .catch(err => console.error('❌ Failed to trigger Node.js cleanup:', err));
+            } else {
+              console.error('❌ CRITICAL: triggerNodeCleanup function not available!');
+            }
           }
-        });
-
-        // Standard meeting events with cleanup triggers
-        meeting.on('meeting:left', () => {
-          console.log('👋 Meeting left - triggering cleanup');
-          window.shouldCloseBrowser = true;
-        });
-
-        meeting.on('meeting:ended', () => {
-          console.log('🔚 Meeting ended - triggering cleanup');
-          window.shouldCloseBrowser = true;
-        });
-        
-        meeting.on('meeting:inactive', () => {
-          console.log('💤 Meeting inactive - triggering cleanup');
-          window.shouldCloseBrowser = true;
         });
 
 
@@ -717,22 +724,6 @@ class MultistreamWebexClient {
   // CLEANUP AND LIFECYCLE
   // ============================================================================
 
-  startBrowserCloseMonitoring() {
-    this.closeMonitorInterval = setInterval(async () => {
-      try {
-        const shouldClose = await this.page.evaluate(() => window.shouldCloseBrowser);
-        if (shouldClose) {
-          this.logger(`🚪 Browser close requested - meeting ended`, 'warn');
-          await this.cleanup();
-          return;
-        }
-      } catch (error) {
-        this.logger('⚠️ Browser monitoring stopped (page closed)', 'info');
-        clearInterval(this.closeMonitorInterval);
-      }
-    }, 1000);
-  }
-
   async cleanup() {
     this.logger('🧹 Starting comprehensive multistream cleanup...', 'info');
     
@@ -740,11 +731,6 @@ class MultistreamWebexClient {
     this.isInMeeting = false;
     
     // 2. Clear all Node.js intervals
-    if (this.closeMonitorInterval) {
-      clearInterval(this.closeMonitorInterval);
-      this.closeMonitorInterval = null;
-    }
-    
     if (this.audioInterval) {
       clearInterval(this.audioInterval);
       this.audioInterval = null;
@@ -839,67 +825,6 @@ class MultistreamWebexClient {
     this.audioProcessor = null;
     
     this.logger('✅ Comprehensive multistream cleanup completed', 'success');
-  }
-
-  async leaveMeeting() {
-    this.logger('👋 Leaving multistream meeting...', 'info');
-    this.isInMeeting = false;
-    
-    if (this.audioInterval) {
-      clearInterval(this.audioInterval);
-      this.audioInterval = null;
-    }
-    
-    if (this.speakerEventInterval) {
-      clearInterval(this.speakerEventInterval);
-      this.speakerEventInterval = null;
-    }
-
-    try {
-      await this.page.evaluate(() => {
-        // Stop and clean up MediaRecorder
-        if (window.stopMediaRecorder) {
-          window.stopMediaRecorder();
-          window.stopMediaRecorder = null;
-        }
-        if (window.mediaRecorder) {
-          window.mediaRecorder = null;
-        }
-        
-        // Clean up audio element
-        const remoteAudioElement = document.getElementById('multistream-remote-audio');
-        if (remoteAudioElement) {
-          remoteAudioElement.srcObject = null;
-          remoteAudioElement.remove();
-        }
-        
-        // Clear global variables
-        window.webexAudioStream = null;
-        window.audioChunkReady = null;
-        window.speakerEvents = [];
-        
-        // Clear speaker debouncing timers
-        if (window.speakerDebounceTimer) {
-          clearTimeout(window.speakerDebounceTimer);
-        }
-        if (window.silenceTimer) {
-          clearTimeout(window.silenceTimer);
-        }
-      });
-      
-      // Update meeting status in backend
-      if (this.meetingUuid) {
-        await this.backendClient.updateMeetingStatus(this.meetingUuid, {
-          is_active: false,
-          actual_leave_time: new Date().toISOString()
-        });
-        this.logger('✅ Meeting status updated to inactive', 'success');
-      }
-    } catch (error) {
-      this.logger(`❌ Cleanup error: ${error.message}`, 'error');
-    }
-
-    this.logger('✅ Multistream meeting left successfully', 'success');
   }
 
   getStatus() {

@@ -215,11 +215,10 @@ class HeadlessRunner {
         console.log(`📞 Leave meeting request received`);
         
         if (this.activeMeetings.has(meetingId)) {
-          const { page, webexClient } = this.activeMeetings.get(meetingId);
+          const { webexClient } = this.activeMeetings.get(meetingId);
           
-          // Leave meeting gracefully
-          await webexClient.leaveMeeting();
-          await page.close();
+          // Cleanup handles everything including closing browser
+          await webexClient.cleanup();
           this.activeMeetings.delete(meetingId);
           
           console.log(`✅ Meeting left successfully`);
