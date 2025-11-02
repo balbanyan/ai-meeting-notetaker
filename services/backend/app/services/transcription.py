@@ -1,9 +1,10 @@
 """
 Simple Groq Whisper Transcription Service
-Handles audio transcription using Groq's Whisper API
+Handles audio transcription using Groq's Whisper API with word-level timestamps
 """
 
 import httpx
+import json
 import logging
 from typing import Dict, Optional
 from app.core.config import settings
@@ -38,11 +39,12 @@ class GroqWhisperService:
             }
         
         try:
-            # Prepare multipart form data for Groq API
+            # Prepare multipart form data for Groq API with word-level timestamps
             files = {
                 'file': ('audio.wav', audio_data, 'audio/wav'),
                 'model': (None, self.model),
-                'response_format': (None, 'json'),  # Simple JSON response
+                'response_format': (None, 'verbose_json'),  # Required for word timestamps
+                'timestamp_granularities[]': (None, 'word'),  # Request word-level timestamps
                 # Note: Groq API doesn't support multiple languages in one request
                 # Using auto-detect for English/Arabic support
                 # 'language': (None, 'en'),  # Removed - using auto-detect for multilingual
@@ -67,14 +69,17 @@ class GroqWhisperService:
             if response.status_code == 200:
                 result = response.json()
                 transcript_text = result.get('text', '').strip()
+                words = result.get('words', [])
                 
-                logger.info(f"✅ Transcription successful ({len(transcript_text)} chars)")
+                logger.info(f"✅ Transcription successful ({len(transcript_text)} chars, {len(words)} words)")
                 
                 return {
                     'success': True,
                     'transcript': transcript_text,
-                    'model_used': self.model,
-                    'language': result.get('language', 'en')
+                    'words': words,  # Word-level timestamps
+                    'duration': result.get('duration'),
+                    'language': result.get('language', 'en'),
+                    'model_used': self.model
                 }
             else:
                 error_msg = f"Groq API Error: {response.status_code}"
@@ -141,16 +146,23 @@ async def transcribe_chunk_async(chunk_uuid: str):
         
         # Update database with result
         if result['success']:
-            chunk.chunk_transcript = result['transcript']
+            # Store transcript as JSON with word timestamps
+            transcript_data = {
+                'text': result['transcript'],
+                'words': result.get('words', []),
+                'duration': result.get('duration'),
+                'language': result.get('language', 'en')
+            }
+            chunk.chunk_transcript = json.dumps(transcript_data)
             chunk.transcription_status = "completed"
             
             # COMMIT FIRST to ensure transcript is saved before speaker mapping
             db.commit()
             db.refresh(chunk)  # Refresh to ensure we have latest data
             
-            logger.info(f"✅ Transcription completed for chunk UUID: {chunk.id}, chunk_id: {chunk.chunk_id}")
+            logger.info(f"✅ Transcription completed for chunk UUID: {chunk.id}, chunk_id: {chunk.chunk_id} ({len(result.get('words', []))} words)")
             
-            # NEW: Trigger speaker mapping after successful transcription (AFTER commit)
+            # Trigger speaker mapping after successful transcription (AFTER commit)
             if chunk.chunk_transcript and chunk.audio_started_at:
                 try:
                     from app.services.audio_speaker_mapper import AudioSpeakerMapper
