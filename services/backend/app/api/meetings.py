@@ -101,6 +101,7 @@ async def register_and_join_meeting(
         # Extract data from API response
         meeting_link = meeting_data["meeting_link"]
         meeting_number = meeting_data["meeting_number"]
+        meeting_title = meeting_data.get("title")
         host_email = meeting_data["host_email"]
         participant_emails = meeting_data.get("participant_emails", [])
         cohost_emails = meeting_data.get("cohost_emails", [])
@@ -136,6 +137,7 @@ async def register_and_join_meeting(
             existing_meeting.host_email = host_email
             existing_meeting.meeting_link = meeting_link
             existing_meeting.meeting_number = meeting_number
+            existing_meeting.meeting_title = meeting_title
             
             # Update scheduled times if provided
             if scheduled_start:
@@ -159,6 +161,7 @@ async def register_and_join_meeting(
                 webex_meeting_id=request.meeting_id,
                 meeting_number=meeting_number,
                 meeting_link=meeting_link,
+                meeting_title=meeting_title,
                 host_email=host_email,
                 participant_emails=participant_emails,
                 cohost_emails=cohost_emails,
@@ -701,4 +704,188 @@ async def get_transcripts(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve transcripts: {str(e)}"
+        )
+
+
+# ============================================================================
+# FRONTEND API ENDPOINTS - Meeting List & Details
+# ============================================================================
+
+
+class MeetingListItem(BaseModel):
+    meeting_uuid: str
+    webex_meeting_id: str
+    meeting_number: Optional[str]
+    meeting_title: Optional[str]
+    host_email: Optional[str]
+    participant_emails: Optional[List[str]]
+    cohost_emails: Optional[List[str]]
+    scheduled_start_time: Optional[datetime]
+    scheduled_end_time: Optional[datetime]
+    actual_join_time: Optional[datetime]
+    actual_leave_time: Optional[datetime]
+    meeting_summary: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+
+class MeetingsListResponse(BaseModel):
+    meetings: List[MeetingListItem]
+    total_count: int
+
+
+@router.get("/meetings/list", response_model=MeetingsListResponse)
+async def list_meetings(db: Session = Depends(get_db)):
+    """
+    Get all completed meetings (is_active = false) for the frontend dashboard.
+    
+    Returns meetings ordered by most recent first (actual_leave_time DESC).
+    No authentication required - matches embedded app pattern.
+    """
+    try:
+        print(f"📋 LIST MEETINGS: fetching all inactive meetings")
+        
+        # Query all meetings where is_active = False
+        meetings = db.query(Meeting).filter(
+            Meeting.is_active == False
+        ).order_by(Meeting.actual_leave_time.desc()).all()
+        
+        print(f"✅ Found {len(meetings)} completed meeting(s)")
+        
+        # Build response items
+        meeting_items = []
+        for meeting in meetings:
+            item = MeetingListItem(
+                meeting_uuid=str(meeting.id),
+                webex_meeting_id=meeting.webex_meeting_id,
+                meeting_number=meeting.meeting_number,
+                meeting_title=meeting.meeting_title,
+                host_email=meeting.host_email,
+                participant_emails=meeting.participant_emails or [],
+                cohost_emails=meeting.cohost_emails or [],
+                scheduled_start_time=meeting.scheduled_start_time,
+                scheduled_end_time=meeting.scheduled_end_time,
+                actual_join_time=meeting.actual_join_time,
+                actual_leave_time=meeting.actual_leave_time,
+                meeting_summary=meeting.meeting_summary
+            )
+            meeting_items.append(item)
+        
+        return MeetingsListResponse(
+            meetings=meeting_items,
+            total_count=len(meetings)
+        )
+    
+    except Exception as e:
+        print(f"❌ LIST MEETINGS FAILED - {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve meetings list: {str(e)}"
+        )
+
+
+class MeetingDetailsTranscript(BaseModel):
+    speaker_name: Optional[str]
+    transcript_text: str
+    start_time: datetime
+    end_time: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class MeetingDetailsResponse(BaseModel):
+    meeting_uuid: str
+    webex_meeting_id: str
+    meeting_number: Optional[str]
+    meeting_title: Optional[str]
+    meeting_link: str
+    host_email: Optional[str]
+    participant_emails: Optional[List[str]]
+    cohost_emails: Optional[List[str]]
+    scheduled_start_time: Optional[datetime]
+    scheduled_end_time: Optional[datetime]
+    actual_join_time: Optional[datetime]
+    actual_leave_time: Optional[datetime]
+    meeting_type: Optional[str]
+    meeting_summary: Optional[str]
+    transcripts: List[MeetingDetailsTranscript]
+    
+    class Config:
+        from_attributes = True
+
+
+@router.get("/meetings/{meeting_uuid}", response_model=MeetingDetailsResponse)
+async def get_meeting_details(meeting_uuid: str, db: Session = Depends(get_db)):
+    """
+    Get detailed meeting information including transcripts for a specific meeting.
+    
+    Returns full meeting data plus all speaker transcripts ordered chronologically.
+    No authentication required - matches embedded app pattern.
+    """
+    try:
+        print(f"🔍 GET MEETING DETAILS: {meeting_uuid}")
+        
+        # Parse UUID
+        try:
+            uuid_obj = uuid.UUID(meeting_uuid)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid meeting UUID format")
+        
+        # Find meeting
+        meeting = db.query(Meeting).filter(Meeting.id == uuid_obj).first()
+        
+        if not meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        print(f"✅ Meeting found - {meeting.webex_meeting_id}")
+        
+        # Fetch all speaker transcripts for this meeting, ordered chronologically
+        transcripts = db.query(SpeakerTranscript).filter(
+            SpeakerTranscript.meeting_id == uuid_obj
+        ).order_by(SpeakerTranscript.start_time.asc()).all()
+        
+        print(f"📝 Found {len(transcripts)} transcript(s)")
+        
+        # Build transcript items
+        transcript_items = [
+            MeetingDetailsTranscript(
+                speaker_name=t.speaker_name,
+                transcript_text=t.transcript_text,
+                start_time=t.start_time,
+                end_time=t.end_time
+            )
+            for t in transcripts
+        ]
+        
+        return MeetingDetailsResponse(
+            meeting_uuid=str(meeting.id),
+            webex_meeting_id=meeting.webex_meeting_id,
+            meeting_number=meeting.meeting_number,
+            meeting_title=meeting.meeting_title,
+            meeting_link=meeting.meeting_link,
+            host_email=meeting.host_email,
+            participant_emails=meeting.participant_emails or [],
+            cohost_emails=meeting.cohost_emails or [],
+            scheduled_start_time=meeting.scheduled_start_time,
+            scheduled_end_time=meeting.scheduled_end_time,
+            actual_join_time=meeting.actual_join_time,
+            actual_leave_time=meeting.actual_leave_time,
+            meeting_type=meeting.meeting_type,
+            meeting_summary=meeting.meeting_summary,
+            transcripts=transcript_items
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ GET MEETING DETAILS FAILED - {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve meeting details: {str(e)}"
         )

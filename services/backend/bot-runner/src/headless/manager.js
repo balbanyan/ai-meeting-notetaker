@@ -39,12 +39,14 @@ class HeadlessRunner {
           '--disable-web-security', // For Webex SDK
           '--allow-running-insecure-content',
           '--use-fake-ui-for-media-stream', // Auto-grant media permissions
-          '--allow-running-insecure-content',
+          '--use-fake-device-for-media-stream', // Create fake audio/video devices for headless
+          '--enable-usermedia-screen-capturing', // Enable media capture
+          '--allow-http-screen-capture', // Allow screen/media capture over HTTP
           '--enable-features=WebRTC',
-          '--disable-web-security',
+          '--disable-features=VizDisplayCompositor', // For better audio support
           '--allow-cross-origin-auth-prompt',
           '--autoplay-policy=no-user-gesture-required',
-          '--disable-features=VizDisplayCompositor' // For better audio support
+          '--window-size=1280,720' // Match viewport size for media features
         ],
         defaultViewport: {
           width: 1280,
@@ -115,6 +117,9 @@ class HeadlessRunner {
         
         // Create new page for this meeting
         const page = await this.browser.newPage();
+        
+        // Set page timeout to allow for longer initialization (especially for addMedia in GCP)
+        page.setDefaultTimeout(120000); // 2 minutes for all operations
         
         // Grant microphone permissions for known Webex domains
         const context = this.browser.defaultBrowserContext();

@@ -437,10 +437,13 @@ class MultistreamWebexClient {
 
         // Add media with multistream configuration
         console.log('🎧 Adding media with multistream configuration...');
+        try {
         await meeting.addMedia({
           mediaOptions: {
-            receiveAudio: true,
-            receiveVideo: false  // Audio-only focus
+              sendAudio: false,      // Don't send audio (receive-only bot)
+              sendVideo: false,      // Don't send video (receive-only bot)
+              receiveAudio: true,    // Receive audio
+              receiveVideo: false    // Audio-only focus
           },
           remoteMediaManagerConfig: {
             audio: {
@@ -459,6 +462,14 @@ class MultistreamWebexClient {
           }
         });
         console.log('✅ Multistream media added successfully');
+        } catch (addMediaError) {
+          console.error('❌ Failed to add media:', {
+            message: addMediaError.message,
+            name: addMediaError.name,
+            stack: addMediaError.stack
+          });
+          throw new Error(`Failed to add media: ${addMediaError.message}`);
+        }
 
         // Store meeting reference for speaker processing
         window.currentMeeting = meeting;

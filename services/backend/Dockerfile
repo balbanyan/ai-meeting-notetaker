@@ -28,6 +28,9 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     xdg-utils \
     ffmpeg \
+    pulseaudio \
+    alsa-utils \
+    libpulse0 \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \

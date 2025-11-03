@@ -409,7 +409,13 @@ class PuppeteerWebexClient {
 
         // Add media
         console.log('🎧 Adding media...');
-        await meeting.addMedia({ mediaOptions: { receiveAudio: true } });
+        await meeting.addMedia({ 
+          mediaOptions: { 
+            sendAudio: false,    // Don't send audio (receive-only bot)
+            sendVideo: false,    // Don't send video (receive-only bot)
+            receiveAudio: true   // Receive audio only
+          } 
+        });
         console.log('✅ Media added successfully');
 
         return { success: true, meetingId: meetingUrl };

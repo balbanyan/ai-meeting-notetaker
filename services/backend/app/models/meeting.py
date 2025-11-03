@@ -15,6 +15,7 @@ class Meeting(Base):
     webex_meeting_id = Column(String(255), nullable=False, unique=True, index=True)
     meeting_number = Column(String(100), nullable=True, index=True)  # User-friendly numeric ID (e.g., "123 456 789")
     meeting_link = Column(String(2048), nullable=False, index=True)
+    meeting_title = Column(String(500), nullable=True)  # Meeting title from Webex API
     
     # Meeting Details from List Meetings API
     host_email = Column(String(255), nullable=True, index=True)

@@ -6,6 +6,16 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
+# Accept build argument for backend URL
+ARG VITE_BACKEND_URL
+ENV VITE_BACKEND_URL=${VITE_BACKEND_URL}
+
+# Debug: Print the backend URL being used
+RUN echo "========================================" && \
+    echo "Building frontend with:" && \
+    echo "  VITE_BACKEND_URL=${VITE_BACKEND_URL}" && \
+    echo "========================================" || true
+
 # Copy package files
 COPY package*.json ./
 
@@ -15,8 +25,11 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build the application
-RUN npm run build
+# Build the application (Vite will use VITE_BACKEND_URL from ENV)
+RUN echo "Starting Vite build..." && \
+    npm run build && \
+    echo "Build complete! Checking output..." && \
+    ls -la dist/ || true
 
 # Stage 2: Serve with nginx
 FROM nginx:alpine
