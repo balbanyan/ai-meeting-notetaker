@@ -19,6 +19,7 @@ from app.core.database import SessionLocal
 from app.models.audio_chunk import AudioChunk
 from app.models.speaker_event import SpeakerEvent
 from app.models.speaker_transcript import SpeakerTranscript
+from app.services.palantir_service import palantir_service
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +277,18 @@ class AudioSpeakerMapper:
             self.db.refresh(speaker_transcript)
             
             logger.debug(f"💾 Saved segment: {segment['speaker_name']} ({segment['word_count']} words, confidence: {segment['confidence']:.2f})")
+            
+            # Send transcript to Palantir API (non-blocking)
+            try:
+                palantir_service.send_transcript(
+                    speaker_name=segment['speaker_name'],
+                    transcript_text=segment['text'].strip(),
+                    start_time=segment['start_time'],
+                    end_time=segment['end_time']
+                )
+            except Exception as palantir_error:
+                # Log error but don't fail the workflow
+                logger.error(f"⚠️ Failed to send transcript to Palantir: {str(palantir_error)}")
             
         except Exception as e:
             self.db.rollback()

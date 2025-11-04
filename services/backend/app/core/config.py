@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     # External API Authentication
     external_api_key: str = ""
     
+    # Palantir API Settings
+    palantir_token: str = ""
+    live_demo_url: str = ""
+    send_palantir: bool = False
+    
     class Config:
         env_file = ".env"
         extra = "ignore"  # Ignore bot-runner specific env vars
