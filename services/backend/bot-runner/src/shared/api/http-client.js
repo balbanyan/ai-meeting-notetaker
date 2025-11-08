@@ -106,6 +106,39 @@ class BackendClient {
   }
 
   /**
+   * Send screenshot to backend
+   */
+  async sendScreenshot(meetingId, chunkId, audioChunkId, screenshotData, capturedAt) {
+    try {
+      // Create form data using FormData API
+      const formData = new FormData();
+      formData.append('meeting_id', meetingId);
+      formData.append('chunk_id', chunkId);
+      formData.append('audio_chunk_id', audioChunkId);
+      formData.append('captured_at', capturedAt);
+      
+      // Create blob from buffer for file upload
+      const screenshotBlob = new Blob([screenshotData], { type: 'image/png' });
+      formData.append('screenshot_file', screenshotBlob, `screenshot_${chunkId}.png`);
+
+      const response = await axios.post(`${this.baseURL}/screenshots/capture`, formData, {
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      console.log(`✅ SCREENSHOT SENT - Chunk: ${chunkId}, Status: ${response.data.status}`);
+      
+      return response.data;
+
+    } catch (error) {
+      console.error(`❌ SCREENSHOT SEND FAILED - Chunk: ${chunkId}`, error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Update meeting status (active/inactive)
    */
   async updateMeetingStatus(meetingUuid, statusData) {

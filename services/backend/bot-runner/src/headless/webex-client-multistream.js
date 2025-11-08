@@ -118,6 +118,10 @@ class MultistreamWebexClient {
             enableDebouncing: true
           };
           
+          // Screenshot/screenshare state tracking
+          window.isScreensharing = false;
+          window.screenShareVideoElement = null;
+          
           console.log('🎛️ Speaker Config:', window.SPEAKER_CONFIG);
         </script>
       </body>
@@ -375,11 +379,40 @@ class MultistreamWebexClient {
         });
         
         meeting.on('meeting:startedSharingRemote', (data) => {
-          console.log(`📺 Screen sharing started by remote participant`);
+          console.log(`📺 Screen sharing started - enabling screenshot capture`);
+          window.isScreensharing = true;
         });
         
         meeting.on('meeting:stoppedSharingRemote', (data) => {
-          console.log(`📺 Screen sharing stopped by remote participant`);
+          console.log(`📺 Screen sharing stopped - disabling screenshot capture`);
+          window.isScreensharing = false;
+          if (window.screenShareVideoElement) {
+            window.screenShareVideoElement.srcObject = null;
+          }
+        });
+        
+        // MULTISTREAM EVENT: Remote video layout changed (for screenshare stream)
+        meeting.on('media:remoteVideo:layoutChanged', ({ layoutId, activeSpeakerVideoPanes, memberVideoPanes, screenShareVideo }) => {
+          console.log(`🎬 Video layout changed: ${layoutId}`);
+          
+          if (screenShareVideo && screenShareVideo.stream) {
+            console.log('🖼️ Screenshare stream available');
+            
+            // Create or update video element for screenshare
+            if (!window.screenShareVideoElement) {
+              const videoEl = document.createElement('video');
+              videoEl.id = 'screenshare-video';
+              videoEl.autoplay = true;
+              videoEl.muted = true;
+              videoEl.style.display = 'none';
+              document.body.appendChild(videoEl);
+              window.screenShareVideoElement = videoEl;
+              console.log('✅ Created hidden screenshare video element');
+            }
+            
+            window.screenShareVideoElement.srcObject = screenShareVideo.stream;
+            console.log('✅ Screenshare stream attached to video element');
+          }
         });
 
         // Handle media streams stopping - PRIMARY CLEANUP TRIGGER
@@ -443,7 +476,7 @@ class MultistreamWebexClient {
               sendAudio: false,      // Don't send audio (receive-only bot)
               sendVideo: false,      // Don't send video (receive-only bot)
               receiveAudio: true,    // Receive audio
-              receiveVideo: false    // Audio-only focus
+              receiveVideo: true     // Enable video for screenshare capture
           },
           remoteMediaManagerConfig: {
             audio: {
@@ -452,10 +485,11 @@ class MultistreamWebexClient {
             },
             video: {
               preferLiveVideo: false,
-              initialLayoutId: 'Single',
+              initialLayoutId: 'ScreenShareOnly',
               layouts: {
-                Single: {
-                  activeSpeakerVideoPaneGroups: []  // Empty - no video panes needed
+                ScreenShareOnly: {
+                  screenShareVideo: { size: 'best' },  // Only receive screenshare
+                  activeSpeakerVideoPaneGroups: []     // No participant videos
                 }
               }
             }
@@ -675,13 +709,22 @@ class MultistreamWebexClient {
     
     this.logger(`🔄 Processing MediaRecorder chunk #${chunkId}`, 'info');
     
+    // Calculate timing data for the chunk
+    const chunkEndTime = new Date();
+    const chunkStartTime = new Date(chunkEndTime.getTime() - 10000); // 10 seconds back
+    
+    // Capture screenshot at start of chunk if enabled
+    let screenshotBuffer = null;
+    if (config.screenshots.enabled) {
+      screenshotBuffer = await this.captureScreenshot();
+      if (screenshotBuffer) {
+        this.logger(`📸 Screenshot captured for chunk #${chunkId}`, 'success');
+      }
+    }
+    
     try {
       const webmBuffer = Buffer.from(audioChunk.data);
       const wavBuffer = await this.convertWebmToWav(webmBuffer);
-      
-      // Calculate timing data for the chunk
-      const chunkEndTime = new Date();
-      const chunkStartTime = new Date(chunkEndTime.getTime() - 10000); // 10 seconds back
       
       await this.backendClient.sendAudioChunk(
         this.meetingUuid, 
@@ -692,8 +735,61 @@ class MultistreamWebexClient {
         chunkEndTime.toISOString()    // audio_ended_at
       );
       this.logger(`✅ WAV chunk sent successfully with timing data`, 'success');
+      
+      // Send screenshot if captured
+      if (screenshotBuffer) {
+        try {
+          await this.backendClient.sendScreenshot(
+            this.meetingUuid,
+            chunkId,
+            chunkId, // audio_chunk_id will be resolved by backend
+            screenshotBuffer,
+            chunkStartTime.toISOString()
+          );
+          this.logger(`✅ Screenshot sent successfully for chunk #${chunkId}`, 'success');
+        } catch (error) {
+          this.logger(`⚠️ Failed to send screenshot: ${error.message}`, 'warn');
+        }
+      }
     } catch (error) {
       this.logger(`❌ Failed to process MediaRecorder chunk: ${error.message}`, 'error');
+    }
+  }
+
+  async captureScreenshot() {
+    if (!config.screenshots.enabled) return null;
+    
+    try {
+      const screenshotData = await this.page.evaluate(() => {
+        return new Promise((resolve) => {
+          if (!window.isScreensharing || !window.screenShareVideoElement) {
+            resolve(null);
+            return;
+          }
+          
+          // Create canvas and capture video frame
+          const video = window.screenShareVideoElement;
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth || 1920;
+          canvas.height = video.videoHeight || 1080;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(video, 0, 0);
+          
+          // Convert to PNG blob
+          canvas.toBlob((blob) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              resolve(Array.from(new Uint8Array(reader.result)));
+            };
+            reader.readAsArrayBuffer(blob);
+          }, 'image/png');
+        });
+      });
+      
+      return screenshotData ? Buffer.from(screenshotData) : null;
+    } catch (error) {
+      this.logger(`❌ Failed to capture screenshot: ${error.message}`, 'error');
+      return null;
     }
   }
 

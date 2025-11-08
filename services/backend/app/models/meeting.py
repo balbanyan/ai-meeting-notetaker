@@ -35,6 +35,9 @@ class Meeting(Base):
     # AI-Generated Content
     meeting_summary = Column(Text, nullable=True)  # LLM-generated meeting summary (MoM)
     
+    # Feature Flags
+    screenshots_enabled = Column(Boolean, default=False, index=True)  # Whether screenshots were enabled for this meeting
+    
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -43,6 +46,7 @@ class Meeting(Base):
     audio_chunks = relationship("AudioChunk", back_populates="meeting")
     speaker_events = relationship("SpeakerEvent", back_populates="meeting")
     speaker_transcripts = relationship("SpeakerTranscript", back_populates="meeting")
+    screenshare_captures = relationship("ScreenshareCapture", back_populates="meeting")
     
     def __repr__(self):
         return f"<Meeting(id={self.id}, webex_meeting_id={self.webex_meeting_id}, host_email={self.host_email})>"

@@ -27,6 +27,7 @@ class AudioChunk(Base):
     # Relationships
     meeting = relationship("Meeting", back_populates="audio_chunks")
     speaker_transcripts = relationship("SpeakerTranscript", back_populates="source_audio_chunk")
+    screenshare_captures = relationship("ScreenshareCapture", back_populates="audio_chunk")
     
     def __repr__(self):
         return f"<AudioChunk(id={self.id}, meeting_id={self.meeting_id}, chunk_id={self.chunk_id})>"

@@ -70,7 +70,7 @@ trap cleanup SIGINT SIGTERM
 
 echo "📦 Starting Backend Service..."
 cd services/backend
-PYTHONPATH=. python -m uvicorn main:app --reload --port 8080 &
+PYTHONPATH=. python3 -m uvicorn main:app --reload --port 8080 &
 BACKEND_PID=$!
 cd ../..
 

@@ -9,7 +9,8 @@ An AI-powered meeting notetaker for Webex meetings that runs as an embedded app 
 - **Multistream Audio Capture**: Individual speaker audio streams with automatic separation
 - **Real-time Speaker Events**: Track who's speaking with timestamps
 - **AI-Powered Transcription**: Converts speech to text using advanced Whisper models
-- **Persistent Data Storage**: Stores audio chunks, speaker events, and transcripts
+- **Screenshare Capture** (Optional): Automatically captures screenshots of shared screens with AI vision analysis
+- **Persistent Data Storage**: Stores audio chunks, speaker events, transcripts, and screenshots
 - **On-Demand Bot Runner**: Bot-runner starts automatically when needed
 
 ## 🏗️ Architecture
@@ -124,6 +125,10 @@ WHISPER_GROQ_API=your_groq_api_key
 # Bot Runner
 BOT_RUNNER_URL=http://localhost:3001
 BOT_SERVICE_TOKEN=your_secure_token
+
+# Screenshot Capture (Optional)
+ENABLE_SCREENSHOTS=false
+VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 ```
 
 **Frontend Environment:**
@@ -146,6 +151,9 @@ WEBEX_BOT_ACCESS_TOKEN=your_bot_access_token
 BOT_DISPLAY_NAME="AI Meeting Notetaker"
 BACKEND_API_URL=http://localhost:8080
 BOT_SERVICE_TOKEN=your_secure_token
+
+# Screenshot Capture (Optional)
+ENABLE_SCREENSHOTS=false
 ```
 
 ### 3. Install Dependencies
@@ -307,6 +315,10 @@ GROQ_API_BASE_URL=https://api.groq.com/openai/v1
 # Bot Runner
 BOT_RUNNER_URL=http://localhost:3001
 BOT_SERVICE_TOKEN=your_secure_token
+
+# Screenshot Capture (Optional)
+ENABLE_SCREENSHOTS=false
+VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 ```
 
 **Frontend (.env):**
@@ -321,6 +333,9 @@ WEBEX_BOT_ACCESS_TOKEN=your_bot_access_token
 BOT_DISPLAY_NAME="AI Meeting Notetaker"
 BACKEND_API_URL=http://localhost:8080
 BOT_SERVICE_TOKEN=your_secure_token
+
+# Screenshot Capture (Optional)
+ENABLE_SCREENSHOTS=false
 ```
 
 ### Audio Configuration

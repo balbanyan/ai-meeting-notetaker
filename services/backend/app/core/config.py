@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     groq_api_base_url: str = "https://api.groq.com/openai/v1"
     llm_model: str = "openai/gpt-oss-120b"  # LLM model for meeting summaries
     
+    # Screenshot and Vision Settings
+    enable_screenshots: bool = False
+    vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    
     # External API Authentication
     external_api_key: str = ""
     

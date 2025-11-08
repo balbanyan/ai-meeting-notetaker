@@ -8,6 +8,7 @@ from app.api.health import router as health_router
 from app.api.meetings import router as meetings_router  
 from app.api.audio import router as audio_router
 from app.api.speaker_events import router as speaker_events_router
+from app.api.screenshots import router as screenshots_router
 
 # Import database setup
 from app.core.database import create_tables, reset_database
@@ -36,6 +37,7 @@ app.include_router(health_router, tags=["Health"])
 app.include_router(meetings_router, tags=["Meetings"])
 app.include_router(audio_router, tags=["Audio"])
 app.include_router(speaker_events_router, tags=["Speaker Events"])
+app.include_router(screenshots_router, tags=["Screenshots"])
 
 
 @app.on_event("startup")

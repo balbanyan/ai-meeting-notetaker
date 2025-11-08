@@ -28,6 +28,12 @@ const config = {
     channels: 1,
   },
   
+  // Screenshot Configuration
+  screenshots: {
+    enabled: process.env.ENABLE_SCREENSHOTS === 'true',
+    format: 'png',
+  },
+  
   // Runtime Mode Configuration
   mode: {
     // BOT_MODE: 'gui' | 'headless' - determines if GUI or headless mode (default: headless)
