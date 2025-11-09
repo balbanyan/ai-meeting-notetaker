@@ -49,6 +49,9 @@ def reset_database():
     """
     Drop and recreate all tables - USE WITH CAUTION!
     This will delete all data. Only use for development/schema changes.
+    
+    Handles concurrent execution gracefully when multiple Cloud Run instances
+    start simultaneously.
     """
     try:
         print("⚠️  Dropping all tables...")
@@ -60,8 +63,15 @@ def reset_database():
     
     try:
         print("📦 Creating tables with new schema...")
-        Base.metadata.create_all(bind=engine)
+        Base.metadata.create_all(bind=engine, checkfirst=True)
         print("✅ Tables created")
     except Exception as e:
-        print(f"❌ Error creating tables: {str(e)}")
-        raise
+        error_msg = str(e).lower()
+        # Ignore "already exists" errors from concurrent startups
+        # This happens when multiple Cloud Run instances reset simultaneously
+        if "already exists" in error_msg or "duplicate key" in error_msg:
+            print(f"⚠️  Database objects already exist (another instance created them) - continuing...")
+        else:
+            # Re-raise other errors (connection issues, permissions, etc.)
+            print(f"❌ Error creating tables: {str(e)}")
+            raise
