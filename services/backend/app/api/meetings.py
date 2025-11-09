@@ -455,6 +455,15 @@ async def update_meeting_status(
         status_text = "active" if request.is_active else "inactive"
         print(f"✅ Meeting {meeting_uuid} marked as {status_text}")
         
+        # Broadcast status change to WebSocket subscribers
+        try:
+            from app.api.websocket import manager
+            await manager.broadcast_status(meeting_uuid, request.is_active)
+            print(f"📡 Broadcast status change via WebSocket: {status_text}")
+        except Exception as ws_error:
+            # Log error but don't fail the workflow
+            print(f"⚠️ Failed to broadcast status via WebSocket: {str(ws_error)}")
+        
         # Trigger meeting summary generation when bot leaves (is_active becomes False)
         if not request.is_active:
             print(f"🤖 Triggering background task to generate meeting summary for {meeting_uuid}")
@@ -725,6 +734,7 @@ class MeetingListItem(BaseModel):
     actual_join_time: Optional[datetime]
     actual_leave_time: Optional[datetime]
     meeting_summary: Optional[str]
+    is_active: bool  # Include is_active status for frontend
     
     class Config:
         from_attributes = True
@@ -738,20 +748,36 @@ class MeetingsListResponse(BaseModel):
 @router.get("/meetings/list", response_model=MeetingsListResponse)
 async def list_meetings(db: Session = Depends(get_db)):
     """
-    Get all completed meetings (is_active = false) for the frontend dashboard.
+    Get all meetings (both active and completed) for the frontend dashboard.
     
-    Returns meetings ordered by most recent first (actual_leave_time DESC).
+    Returns meetings ordered by most recent first:
+    - Active meetings: ordered by actual_join_time DESC
+    - Completed meetings: ordered by actual_leave_time DESC
     No authentication required - matches embedded app pattern.
     """
     try:
-        print(f"📋 LIST MEETINGS: fetching all inactive meetings")
+        print(f"📋 LIST MEETINGS: fetching all meetings (active and completed)")
         
-        # Query all meetings where is_active = False
-        meetings = db.query(Meeting).filter(
-            Meeting.is_active == False
-        ).order_by(Meeting.actual_leave_time.desc()).all()
+        # Query all meetings (both active and inactive)
+        # Order by: active meetings first (by join time), then completed meetings (by leave time)
+        from sqlalchemy import case, desc
         
-        print(f"✅ Found {len(meetings)} completed meeting(s)")
+        meetings = db.query(Meeting).order_by(
+            # First, sort by is_active (True first, False second)
+            desc(Meeting.is_active),
+            # Then within each group, sort by appropriate time
+            # For active: use actual_join_time DESC
+            # For inactive: use actual_leave_time DESC
+            desc(case(
+                (Meeting.is_active == True, Meeting.actual_join_time),
+                else_=Meeting.actual_leave_time
+            ))
+        ).all()
+        
+        active_count = sum(1 for m in meetings if m.is_active)
+        completed_count = len(meetings) - active_count
+        
+        print(f"✅ Found {len(meetings)} meeting(s): {active_count} active, {completed_count} completed")
         
         # Build response items
         meeting_items = []
@@ -768,7 +794,8 @@ async def list_meetings(db: Session = Depends(get_db)):
                 scheduled_end_time=meeting.scheduled_end_time,
                 actual_join_time=meeting.actual_join_time,
                 actual_leave_time=meeting.actual_leave_time,
-                meeting_summary=meeting.meeting_summary
+                meeting_summary=meeting.meeting_summary,
+                is_active=meeting.is_active
             )
             meeting_items.append(item)
         
@@ -788,6 +815,7 @@ async def list_meetings(db: Session = Depends(get_db)):
 
 
 class MeetingDetailsTranscript(BaseModel):
+    id: str  # Transcript ID for duplicate detection
     speaker_name: Optional[str]
     transcript_text: str
     start_time: datetime
@@ -812,6 +840,7 @@ class MeetingDetailsResponse(BaseModel):
     actual_leave_time: Optional[datetime]
     meeting_type: Optional[str]
     meeting_summary: Optional[str]
+    is_active: bool  # Include is_active for live meeting detection
     transcripts: List[MeetingDetailsTranscript]
     
     class Config:
@@ -853,6 +882,7 @@ async def get_meeting_details(meeting_uuid: str, db: Session = Depends(get_db)):
         # Build transcript items
         transcript_items = [
             MeetingDetailsTranscript(
+                id=str(t.id),
                 speaker_name=t.speaker_name,
                 transcript_text=t.transcript_text,
                 start_time=t.start_time,
@@ -876,6 +906,7 @@ async def get_meeting_details(meeting_uuid: str, db: Session = Depends(get_db)):
             actual_leave_time=meeting.actual_leave_time,
             meeting_type=meeting.meeting_type,
             meeting_summary=meeting.meeting_summary,
+            is_active=meeting.is_active,
             transcripts=transcript_items
         )
     

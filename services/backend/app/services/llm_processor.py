@@ -110,6 +110,13 @@ async def generate_meeting_summary(meeting_id, db: Session) -> None:
         
         print(f"✅ Meeting summary generated successfully for meeting {meeting_id}")
         
+        # Broadcast summary via WebSocket
+        try:
+            from app.api.websocket import manager
+            manager.broadcast_summary_sync(str(meeting_id), llm_response)
+        except Exception as ws_error:
+            print(f"⚠️ Failed to broadcast summary via WebSocket: {str(ws_error)}")
+        
     except Exception as e:
         # Store error message in meeting_summary for debugging
         error_msg = f"Error generating summary: {str(e)}"

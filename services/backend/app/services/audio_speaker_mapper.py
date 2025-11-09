@@ -278,6 +278,27 @@ class AudioSpeakerMapper:
             
             logger.debug(f"💾 Saved segment: {segment['speaker_name']} ({segment['word_count']} words, confidence: {segment['confidence']:.2f})")
             
+            # Broadcast new transcript to WebSocket subscribers (thread-safe)
+            try:
+                from app.api.websocket import manager
+                
+                transcript_data = {
+                    "id": str(speaker_transcript.id),
+                    "meeting_id": str(meeting_id),
+                    "speaker_name": segment['speaker_name'],
+                    "transcript_text": segment['text'].strip(),
+                    "start_time": segment['start_time'].isoformat(),
+                    "end_time": segment['end_time'].isoformat(),
+                    "confidence_score": segment['confidence']
+                }
+                
+                # Use thread-safe synchronous broadcast method
+                manager.broadcast_transcript_sync(str(meeting_id), transcript_data)
+                
+            except Exception as ws_error:
+                # Log error but don't fail the workflow
+                logger.error(f"⚠️ Failed to broadcast transcript via WebSocket: {str(ws_error)}")
+            
             # Send transcript to Palantir API (non-blocking)
             try:
                 palantir_service.send_transcript(

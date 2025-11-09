@@ -99,3 +99,85 @@
   color: var(--text-primary);
 }
 
+/* Live Meeting Styles */
+.meeting-card-live {
+  border: 2px solid #60BC94;
+  box-shadow: 0 0 20px rgba(96, 188, 148, 0.3);
+  position: relative;
+}
+
+.meeting-card-live::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #60BC94, #82C9A5);
+  opacity: 0.2;
+  z-index: -1;
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.meeting-card-live:hover {
+  border-color: #60BC94;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(96, 188, 148, 0.4);
+}
+
+.meeting-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: linear-gradient(135deg, #60BC94, #82C9A5);
+  color: #00604C;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  margin-left: 0.5rem;
+  animation: pulse-badge 2s ease-in-out infinite;
+  box-shadow: 0 2px 8px rgba(96, 188, 148, 0.3);
+}
+
+@keyframes pulse-badge {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 2px 8px rgba(96, 188, 148, 0.3);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 2px 12px rgba(96, 188, 148, 0.5);
+  }
+}
+
+.meeting-live-badge::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background-color: #00604C;
+  border-radius: 50%;
+  animation: blink 1.5s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { registerAndJoinMeeting } from '../api/client'
+import { connectToMeeting } from '../api/websocket'
 
 // Funny loading messages
 const loadingMessages = [
@@ -35,6 +36,9 @@ function EmbeddedApp() {
   const [joining, setJoining] = useState(false)
   const [success, setSuccess] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState('')
+  const [isBotActive, setIsBotActive] = useState(false)
+  const [checkingStatus, setCheckingStatus] = useState(true)
+  const websocketRef = useRef(null)
   
   // Dev mode: Manual meeting ID input
   const [manualMeetingId, setManualMeetingId] = useState('')
@@ -44,6 +48,7 @@ function EmbeddedApp() {
     if (isDev) {
       console.log('🔧 Running in DEV MODE - Webex SDK disabled')
       setLoading(false)
+      setCheckingStatus(false)
       return
     }
     
@@ -55,6 +60,7 @@ function EmbeddedApp() {
           console.error('Webex SDK not loaded')
           setError('Webex SDK not loaded. Please refresh the page.')
           setLoading(false)
+          setCheckingStatus(false)
           return
         }
 
@@ -70,29 +76,73 @@ function EmbeddedApp() {
           const meeting = await app.context.getMeeting()
           console.log('Meeting data:', meeting)
           
-          setMeetingData({
+          const meetingInfo = {
             id: meeting.id,
             conferenceId: meeting.conferenceId,
             title: meeting.title,
             // Note: startTime, endTime, meetingType may not be available from SDK
             // Backend will fetch these from Webex API using the meeting ID
-          })
+          }
+          
+          setMeetingData(meetingInfo)
+          
+          // Setup WebSocket to monitor meeting status
+          setupWebSocket(meeting.id)
           
           setLoading(false)
         } catch (meetingError) {
           console.warn('Could not get meeting data:', meetingError)
           setError('No meeting data available. This app must be run inside a Webex meeting.')
           setLoading(false)
+          setCheckingStatus(false)
         }
       } catch (err) {
         console.error('Failed to initialize Webex SDK:', err)
         setError(`Failed to initialize: ${err.message}`)
         setLoading(false)
+        setCheckingStatus(false)
       }
     }
 
     initializeWebex()
+    
+    // Cleanup WebSocket on unmount
+    return () => {
+      if (websocketRef.current) {
+        websocketRef.current.disconnect()
+        websocketRef.current = null
+      }
+    }
   }, [isDev])
+  
+  const setupWebSocket = (meetingId) => {
+    console.log('Setting up WebSocket for meeting status:', meetingId)
+    
+    websocketRef.current = connectToMeeting(meetingId, {
+      onConnected: () => {
+        console.log('WebSocket connected - checking meeting status')
+        setCheckingStatus(false)
+      },
+      onStatus: (statusData) => {
+        console.log('Meeting status update:', statusData)
+        setIsBotActive(statusData.is_active)
+        
+        // Show success message when bot joins
+        if (statusData.is_active && joining) {
+          setSuccess(true)
+          setJoining(false)
+        }
+      },
+      onDisconnected: () => {
+        console.log('WebSocket disconnected')
+        setCheckingStatus(false)
+      },
+      onError: () => {
+        console.log('WebSocket error - bot status unknown')
+        setCheckingStatus(false)
+      }
+    })
+  }
 
   const handleAddBot = async () => {
     // Get meeting ID based on mode
@@ -219,22 +269,38 @@ function EmbeddedApp() {
       )}
 
       <div className="action-section">
+        {checkingStatus && !isDev && (
+          <div className="status-checking">
+            <div className="button-spinner-small"></div>
+            <span>Checking bot status...</span>
+          </div>
+        )}
+        
+        {isBotActive && !isDev && (
+          <div className="bot-active-message">
+            <span className="status-indicator status-active"></span>
+            Bot is currently active in this meeting
+          </div>
+        )}
+        
         <button 
           className="primary-button" 
           onClick={handleAddBot}
-          disabled={joining || (!isDev && !meetingData) || (isDev && !manualMeetingId)}
+          disabled={joining || (!isDev && !meetingData) || (isDev && !manualMeetingId) || (isBotActive && !isDev)}
         >
           {joining ? (
             <>
               <div className="button-spinner"></div>
               <span className="loading-text">{loadingMessage}</span>
             </>
+          ) : isBotActive && !isDev ? (
+            'Bot Already Active'
           ) : (
             'Add Bot to Meeting'
           )}
         </button>
 
-        {success && (
+        {success && !isBotActive && (
           <div className="success-message">
             Bot successfully added to meeting! It will join shortly.
           </div>

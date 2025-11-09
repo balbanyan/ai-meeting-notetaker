@@ -44,9 +44,12 @@ function MeetingCard({ meeting }) {
   }
 
   return (
-    <div className="meeting-card" onClick={handleClick}>
+    <div className={`meeting-card ${meeting.is_active ? 'meeting-card-live' : ''}`} onClick={handleClick}>
       <div className="meeting-card-header">
-        <h3 className="meeting-card-title">{getMeetingTitle()}</h3>
+        <h3 className="meeting-card-title">
+          {getMeetingTitle()}
+          {meeting.is_active && <span className="meeting-live-badge">LIVE</span>}
+        </h3>
         <span className="meeting-card-badge">
           {getTotalParticipants()} participant{getTotalParticipants() !== 1 ? 's' : ''}
         </span>
@@ -59,7 +62,9 @@ function MeetingCard({ meeting }) {
         </div>
 
         <div className="meeting-card-info">
-          <span className="meeting-card-label">Date:</span>
+          <span className="meeting-card-label">
+            {meeting.is_active ? 'Started:' : 'Date:'}
+          </span>
           <span className="meeting-card-value">
             {formatDateTime(meeting.actual_join_time || meeting.scheduled_start_time)}
           </span>
@@ -78,7 +83,7 @@ function MeetingCard({ meeting }) {
 
       <div className="meeting-card-footer">
         <span className="meeting-card-link">
-          View Details <MdArrowForward />
+          {meeting.is_active ? 'View Live Transcripts' : 'View Details'} <MdArrowForward />
         </span>
       </div>
     </div>

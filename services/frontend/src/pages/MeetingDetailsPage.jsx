@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { fetchMeetingDetails } from '../api/client'
+import { connectToMeeting } from '../api/websocket'
 import { 
   MdInfoOutline, 
   MdPeople, 
@@ -21,9 +22,12 @@ function MeetingDetailsPage() {
   const [meeting, setMeeting] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [activeTab, setActiveTab] = useState('summary') // 'summary' or 'transcript'
+  const [activeTab, setActiveTab] = useState('summary') // 'summary' or 'transcript' - will be set based on meeting status
   const [infoCollapsed, setInfoCollapsed] = useState(false)
   const [participantsCollapsed, setParticipantsCollapsed] = useState(false)
+  const [autoScroll, setAutoScroll] = useState(true)
+  const transcriptEndRef = useRef(null)
+  const websocketRef = useRef(null)
 
   useEffect(() => {
     const loadMeetingDetails = async () => {
@@ -32,6 +36,12 @@ function MeetingDetailsPage() {
         const response = await fetchMeetingDetails(uuid)
         console.log('Fetched meeting details:', response)
         setMeeting(response)
+        
+        // For live meetings, default to transcript tab
+        if (response.is_active) {
+          setActiveTab('transcript')
+          setupWebSocket(response)
+        }
       } catch (err) {
         console.error('Failed to fetch meeting details:', err)
         setError(err.message || 'Failed to load meeting details')
@@ -41,7 +51,106 @@ function MeetingDetailsPage() {
     }
 
     loadMeetingDetails()
+    
+    // Cleanup WebSocket on unmount
+    return () => {
+      if (websocketRef.current) {
+        websocketRef.current.disconnect()
+        websocketRef.current = null
+      }
+    }
   }, [uuid])
+  
+  const setupWebSocket = (meetingData) => {
+    console.log('Setting up WebSocket for live meeting:', uuid)
+    
+    websocketRef.current = connectToMeeting(uuid, {
+      onTranscript: (transcriptData) => {
+        console.log('New transcript received:', transcriptData)
+        
+        // Add new transcript to meeting data (with deduplication)
+        setMeeting(prev => {
+          if (!prev) return prev
+          
+          const newTranscript = {
+            id: transcriptData.id,
+            speaker_name: transcriptData.speaker_name,
+            transcript_text: transcriptData.transcript_text,
+            start_time: transcriptData.start_time,
+            end_time: transcriptData.end_time
+          }
+          
+          // Check if this transcript already exists (by ID)
+          const existingTranscripts = prev.transcripts || []
+          const isDuplicate = existingTranscripts.some(t => t.id === transcriptData.id)
+          
+          if (isDuplicate) {
+            console.log('Duplicate transcript detected, skipping:', transcriptData.id)
+            return prev
+          }
+          
+          return {
+            ...prev,
+            transcripts: [...existingTranscripts, newTranscript]
+          }
+        })
+        
+        // Auto-scroll to new transcript if enabled
+        if (autoScroll && activeTab === 'transcript') {
+          setTimeout(() => {
+            transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+          }, 100)
+        }
+      },
+      onStatus: (statusData) => {
+        console.log('Meeting status update:', statusData)
+        
+        // Update meeting active status
+        setMeeting(prev => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            is_active: statusData.is_active
+          }
+        })
+        
+        // When meeting becomes inactive, enable summary tab (but keep WebSocket for summary)
+        if (!statusData.is_active) {
+          console.log('Meeting ended - summary tab now available, waiting for summary...')
+          // Keep WebSocket open to receive summary
+        }
+      },
+      onSummary: (summaryData) => {
+        console.log('Meeting summary received:', summaryData)
+        
+        // Update meeting with summary
+        setMeeting(prev => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            meeting_summary: summaryData.summary
+          }
+        })
+        
+        // Disconnect WebSocket after receiving summary
+        if (websocketRef.current) {
+          console.log('Summary received, disconnecting WebSocket')
+          websocketRef.current.disconnect()
+          websocketRef.current = null
+        }
+      },
+      onDisconnected: () => {
+        console.log('WebSocket disconnected')
+      }
+    })
+  }
+  
+  // Auto-scroll effect when new transcripts arrive
+  useEffect(() => {
+    if (autoScroll && activeTab === 'transcript' && meeting?.transcripts?.length > 0) {
+      transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [meeting?.transcripts?.length, autoScroll, activeTab])
 
   const formatDateTime = (dateTime) => {
     if (!dateTime) return 'N/A'
@@ -171,7 +280,10 @@ function MeetingDetailsPage() {
         {/* Sidebar */}
         <aside className="details-sidebar">
           <header className="sidebar-header">
-            <h1 className="meeting-title">{getMeetingTitle()}</h1>
+            <h1 className="meeting-title">
+              {getMeetingTitle()}
+              {meeting.is_active && <span className="meeting-live-badge-large">LIVE</span>}
+            </h1>
             <p className="meeting-date">
               {formatDateTime(meeting.actual_join_time || meeting.scheduled_start_time)}
             </p>
@@ -304,11 +416,14 @@ function MeetingDetailsPage() {
           {/* Tabs */}
           <div className="tabs-container">
             <button 
-              className={`tab ${activeTab === 'summary' ? 'active' : ''}`}
-              onClick={() => setActiveTab('summary')}
+              className={`tab ${activeTab === 'summary' ? 'active' : ''} ${meeting.is_active ? 'tab-disabled' : ''}`}
+              onClick={() => !meeting.is_active && setActiveTab('summary')}
+              disabled={meeting.is_active}
+              title={meeting.is_active ? 'Summary will be available after the meeting ends' : 'View meeting summary'}
             >
               <MdDescription className="tab-icon" />
               Summary
+              {meeting.is_active && <span className="live-indicator-small">LIVE</span>}
             </button>
             <button 
               className={`tab ${activeTab === 'transcript' ? 'active' : ''}`}
@@ -344,6 +459,19 @@ function MeetingDetailsPage() {
 
             {activeTab === 'transcript' && (
               <div className="transcript-view">
+                {meeting.is_active && (
+                  <div className="live-controls">
+                    <label className="auto-scroll-toggle">
+                      <input 
+                        type="checkbox" 
+                        checked={autoScroll} 
+                        onChange={(e) => setAutoScroll(e.target.checked)}
+                      />
+                      <span>Auto-scroll to new transcripts</span>
+                    </label>
+                  </div>
+                )}
+                
                 {meeting.transcripts && meeting.transcripts.length > 0 ? (
                   <div className="conversation">
                     {groupTranscripts(meeting.transcripts).map((group, groupIndex) => (
@@ -369,12 +497,13 @@ function MeetingDetailsPage() {
                         </div>
                       </div>
                     ))}
+                    <div ref={transcriptEndRef} />
                   </div>
                 ) : (
                   <div className="empty-state">
                     <MdChat className="empty-icon" />
                     <h3>No Transcript Available</h3>
-                    <p>This meeting doesn't have any transcripts yet.</p>
+                    <p>{meeting.is_active ? 'Waiting for transcripts...' : 'This meeting doesn\'t have any transcripts yet.'}</p>
                   </div>
                 )}
               </div>

@@ -3,7 +3,7 @@
 
 FROM python:3.11-slim
 
-# Install Node.js 18.x and system dependencies
+# Install Node.js 22.x and system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y \
     pulseaudio \
     alsa-utils \
     libpulse0 \
-    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -58,7 +58,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy bot-runner package.json and install dependencies
 COPY bot-runner/package*.json ./bot-runner/
 WORKDIR /app/bot-runner
-RUN npm ci --only=production
+# Use npm install instead of npm ci to handle out-of-sync lock files
+# This will regenerate package-lock.json if needed
+RUN npm install --omit=dev
 
 # Copy bot-runner source code
 COPY bot-runner/src ./src
