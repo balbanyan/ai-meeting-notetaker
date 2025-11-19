@@ -153,6 +153,13 @@ async def register_and_join_meeting(
             db.refresh(existing_meeting)
             
             meeting_uuid = str(existing_meeting.id)
+            
+            # Broadcast status update via WebSocket to both IDs
+            # (HomePage uses UUID, EmbeddedApp uses Webex meeting ID)
+            from app.api.websocket import manager
+            await manager.broadcast_status(request.meeting_id, True)  # Webex meeting ID
+            await manager.broadcast_status(meeting_uuid, True)  # UUID
+            print(f"📡 Broadcasted bot active status to WebSocket subscribers (Webex ID + UUID)")
         else:
             # Create new meeting record
             print(f"🆕 Creating new meeting record")
@@ -178,6 +185,13 @@ async def register_and_join_meeting(
             
             meeting_uuid = str(new_meeting.id)
             print(f"✅ Meeting created - UUID: {meeting_uuid}")
+            
+            # Broadcast status update via WebSocket to both IDs
+            # (HomePage uses UUID, EmbeddedApp uses Webex meeting ID)
+            from app.api.websocket import manager
+            await manager.broadcast_status(request.meeting_id, True)  # Webex meeting ID
+            await manager.broadcast_status(meeting_uuid, True)  # UUID
+            print(f"📡 Broadcasted bot active status to WebSocket subscribers (Webex ID + UUID)")
         
         # Trigger bot join via bot-runner
         print(f"🤖 Triggering bot join with API-retrieved webLink...")
@@ -455,11 +469,13 @@ async def update_meeting_status(
         status_text = "active" if request.is_active else "inactive"
         print(f"✅ Meeting {meeting_uuid} marked as {status_text}")
         
-        # Broadcast status change to WebSocket subscribers
+        # Broadcast status change to WebSocket subscribers (both IDs)
         try:
             from app.api.websocket import manager
-            await manager.broadcast_status(meeting_uuid, request.is_active)
-            print(f"📡 Broadcast status change via WebSocket: {status_text}")
+            await manager.broadcast_status(meeting_uuid, request.is_active)  # UUID
+            if meeting.webex_meeting_id:
+                await manager.broadcast_status(meeting.webex_meeting_id, request.is_active)  # Webex ID
+            print(f"📡 Broadcast status change via WebSocket: {status_text} (UUID + Webex ID)")
         except Exception as ws_error:
             # Log error but don't fail the workflow
             print(f"⚠️ Failed to broadcast status via WebSocket: {str(ws_error)}")

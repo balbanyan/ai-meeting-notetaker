@@ -113,7 +113,7 @@ class MultistreamWebexClient {
           
           // Speaker configuration
           window.SPEAKER_CONFIG = {
-            debounceThreshold: 3000,      // 3 seconds
+            debounceThreshold: 2000,      // 2 seconds
             silenceThreshold: 500,        // 0.5 seconds  
             enableDebouncing: true
           };
@@ -170,9 +170,33 @@ class MultistreamWebexClient {
   async initializeMultistreamWebexAndJoin(meetingUrl) {
     this.logger('🔧 Initializing Webex SDK with multistream in browser...', 'info');
     
+    // Forward console logs from browser
+      this.page.on('console', msg => {
+        const type = msg.type();
+        const text = msg.text();
+        
+        // Forward Webex, Media, Connection, and Debug logs
+        if (text.includes('Webex') || text.includes('Meeting') || text.includes('Media') || 
+            text.includes('addMedia') || text.includes('Connection') || text.includes('🌐') ||
+            text.includes('[DEBUG]') || text.includes('candidate')) {
+          if (type === 'error') {
+            this.logger(`[Browser Console ERROR] ${text}`, 'error');
+          } else if (type === 'warning') {
+            this.logger(`[Browser Console WARN] ${text}`, 'warn');
+          } else {
+            this.logger(`[Browser Console] ${text}`, 'info');
+          }
+        }
+      });
+    
     const result = await this.page.evaluate(async (meetingUrl, config) => {
       try {
-        console.log('🔧 Starting Webex SDK multistream initialization...');
+        // Timing tracker
+        const timings = {
+          sdkInitStart: Date.now()
+        };
+        
+        console.log('🔧 Starting Webex SDK initialization...');
         
         // Wait for Webex to be available
         while (typeof window.Webex === 'undefined') {
@@ -181,7 +205,9 @@ class MultistreamWebexClient {
         }
 
         // Initialize Webex SDK with bot access token
-        const webex = window.Webex.init({
+        let webex;
+        try {
+          webex = window.Webex.init({
           credentials: {
             access_token: config.webex.botAccessToken
           },
@@ -190,33 +216,45 @@ class MultistreamWebexClient {
             meetings: { enableRtx: true }
           }
         });
-
-        console.log('✅ Webex SDK initialized with bot access token');
+          timings.sdkInitEnd = Date.now();
+          console.log(`✅ SDK initialized (${timings.sdkInitEnd - timings.sdkInitStart}ms)`);
+        } catch (err) {
+          timings.sdkInitEnd = Date.now();
+          console.error(`❌ SDK initialization failed after ${timings.sdkInitEnd - timings.sdkInitStart}ms: ${err.message}`);
+          throw err;
+        }
         
-        // Validate bot authentication
+        // Validate bot authentication and register
         console.log('🔐 Validating bot authentication...');
+        timings.registerStart = Date.now();
         try {
             const botInfo = await webex.people.get('me');
             console.log(`✅ Bot authenticated: ${botInfo.displayName}`);
             
             // Register with Webex Cloud
             console.log('📱 Registering with Webex Cloud...');
-            await webex.meetings.register()
-              .catch((err) => {
-                console.error('Registration error:', err);
-                throw err;
-              });
+            await webex.meetings.register();
+            timings.registerEnd = Date.now();
+            console.log(`✅ Registration complete (${timings.registerEnd - timings.registerStart}ms)`);
         } catch (err) {
-            console.error(`❌ Bot authentication failed: ${err.message}`);
+            timings.registerEnd = Date.now();
+            console.error(`❌ Registration failed after ${timings.registerEnd - timings.registerStart}ms: ${err.message}`);
             throw err;
         }
-        
-        console.log('✅ Webex SDK initialized successfully for multistream');
 
         // Create meeting
-        console.log('🏗️ Creating meeting object...');
-        const meeting = await webex.meetings.create(meetingUrl);
-        console.log('✅ Meeting object created');
+        console.log('📋 Creating meeting object...');
+        timings.meetingCreateStart = Date.now();
+        let meeting;
+        try {
+          meeting = await webex.meetings.create(meetingUrl);
+          timings.meetingCreateEnd = Date.now();
+          console.log(`✅ Meeting created (${timings.meetingCreateEnd - timings.meetingCreateStart}ms)`);
+        } catch (err) {
+          timings.meetingCreateEnd = Date.now();
+          console.error(`❌ Meeting creation failed after ${timings.meetingCreateEnd - timings.meetingCreateStart}ms: ${err.message}`);
+          throw err;
+        }
 
         // Set up multistream event listeners
         console.log('🎧 Setting up multistream event listeners...');
@@ -462,14 +500,23 @@ class MultistreamWebexClient {
 
 
         // Join meeting with multistream enabled
-        console.log('🎯 Joining meeting with multistream...');
+        console.log('🚪 Joining meeting...');
+        timings.joinStart = Date.now();
+        try {
         await meeting.join({
           enableMultistream: true  // Enable multistream
         });
-        console.log('✅ Successfully joined meeting with multistream enabled');
+          timings.joinEnd = Date.now();
+          console.log(`✅ Joined meeting (${timings.joinEnd - timings.joinStart}ms)`);
+        } catch (err) {
+          timings.joinEnd = Date.now();
+          console.error(`❌ Join failed after ${timings.joinEnd - timings.joinStart}ms: ${err.message}`);
+          throw err;
+        }
 
         // Add media with multistream configuration
-        console.log('🎧 Adding media with multistream configuration...');
+        console.log('🎧 Starting addMedia()...');
+        timings.addMediaStart = Date.now();
         try {
         await meeting.addMedia({
           mediaOptions: {
@@ -495,14 +542,109 @@ class MultistreamWebexClient {
             }
           }
         });
-        console.log('✅ Multistream media added successfully');
+          timings.addMediaEnd = Date.now();
+          const durationSeconds = Math.round((timings.addMediaEnd - timings.addMediaStart)/1000);
+          console.log(`✅ Media connected (${durationSeconds}s)`);
         } catch (addMediaError) {
-          console.error('❌ Failed to add media:', {
-            message: addMediaError.message,
-            name: addMediaError.name,
-            stack: addMediaError.stack
-          });
-          throw new Error(`Failed to add media: ${addMediaError.message}`);
+          timings.addMediaEnd = Date.now();
+          const durationSeconds = Math.round((timings.addMediaEnd - timings.addMediaStart)/1000);
+          console.error(`❌ Media connection failed after ${durationSeconds}s: ${addMediaError.message}`);
+          throw new Error(`Failed to add media after ${durationSeconds}s: ${addMediaError.message}`);
+        }
+
+        // Connection IP logging
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        try {
+          const mediaProps = meeting.mediaProperties;
+          if (mediaProps && mediaProps.webrtcMediaConnection) {
+            const pc = mediaProps.webrtcMediaConnection.multistreamConnection?.pc;
+            
+            if (pc) {
+              const stats = await pc.getStats();
+              const candidates = new Map();
+              let activePair = null;
+              
+              // Collect candidates
+              stats.forEach((report) => {
+                if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+                  candidates.set(report.id, report);
+                } else if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                  activePair = report;
+                }
+              });
+              
+              // Log connection details
+              if (activePair && activePair.remoteCandidateId && activePair.localCandidateId) {
+                const remoteCandidate = candidates.get(activePair.remoteCandidateId);
+                const localCandidate = candidates.get(activePair.localCandidateId);
+                
+                // Also get transport stats to detect TURN-TLS
+                let transportType = null;
+                stats.forEach((report) => {
+                  if (report.type === 'transport' && report.dtlsState === 'connected') {
+                    // Check if using TLS (TURN-TLS)
+                    if (report.selectedCandidatePairId === activePair.id) {
+                      transportType = report.tlsVersion ? 'TLS' : null;
+                    }
+                  }
+                });
+                
+                if (remoteCandidate) {
+                  let ip = remoteCandidate.address || remoteCandidate.ip;
+                  const protocol = remoteCandidate.protocol?.toUpperCase();
+                  const remoteType = remoteCandidate.candidateType;
+                  const localType = localCandidate?.candidateType;
+                  
+                  // Debug: Log candidate details
+                  console.log(`[DEBUG] Remote candidate: type=${remoteType}, protocol=${protocol}, ip=${ip}`);
+                  console.log(`[DEBUG] Local candidate: type=${localType}`);
+                  console.log(`[DEBUG] Transport type: ${transportType || 'none'}`);
+                  console.log(`[DEBUG] Active pair bytesReceived: ${activePair.bytesReceived}`);
+                  
+                  // Determine connection type label
+                  // Note: TLS/DTLS is used for ALL WebRTC connections (including direct), so we can't use it to detect TURN
+                  // Only relay candidate type or TCP protocol indicates TURN relay
+                  let connectionType = '';
+                  if (remoteType === 'relay' || localType === 'relay') {
+                    // TURN relay - show as TURN-TLS since modern TURN uses TLS
+                    connectionType = `${protocol} (TURN-TLS)`;
+                  } else if (protocol === 'TCP') {
+                    // TCP without relay type still indicates TURN (TCP punch-through rarely works)
+                    connectionType = `TCP (TURN)`;
+                  } else if (remoteType === 'srflx' || localType === 'srflx') {
+                    // STUN reflexive - got public IP via STUN
+                    connectionType = `${protocol} (STUN)`;
+                  } else {
+                    // Direct connection (host or prflx)
+                    connectionType = `${protocol} (Direct)`;
+                  }
+                  
+                  // Convert NAT64 IPv6 to IPv4 format
+                  if (ip && ip.startsWith('64:ff9b::')) {
+                    const ipv6 = ip;
+                    // Extract hex part after 64:ff9b:: (e.g., "3e6d:ff4b")
+                    const hexPart = ip.replace('64:ff9b::', '');
+                    const parts = hexPart.split(':');
+                    if (parts.length === 2) {
+                      const octet1 = parseInt(parts[0].substring(0, 2), 16);
+                      const octet2 = parseInt(parts[0].substring(2, 4), 16);
+                      const octet3 = parseInt(parts[1].substring(0, 2), 16);
+                      const octet4 = parseInt(parts[1].substring(2, 4), 16);
+                      const ipv4 = `${octet1}.${octet2}.${octet3}.${octet4}`;
+                      console.log(`🌐 Connection: ${connectionType} → ${ipv4} (NAT64: ${ipv6})`);
+                    } else {
+                      console.log(`🌐 Connection: ${connectionType} → ${ip}`);
+                    }
+                  } else {
+                    console.log(`🌐 Connection: ${connectionType} → ${ip}`);
+                  }
+                }
+              }
+            }
+          }
+        } catch (err) {
+          // Connection details not critical
         }
 
         // Store meeting reference for speaker processing

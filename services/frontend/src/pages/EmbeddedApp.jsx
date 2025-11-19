@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { registerAndJoinMeeting } from '../api/client'
+import { registerAndJoinMeeting, getMeetingStatus } from '../api/client'
 import { connectToMeeting } from '../api/websocket'
 
 // Funny loading messages
@@ -115,13 +115,25 @@ function EmbeddedApp() {
     }
   }, [isDev])
   
-  const setupWebSocket = (meetingId) => {
+  const setupWebSocket = async (meetingId) => {
     console.log('Setting up WebSocket for meeting status:', meetingId)
     
+    // First, fetch the current meeting status
+    try {
+      const statusData = await getMeetingStatus(meetingId)
+      console.log('Initial meeting status:', statusData)
+      setIsBotActive(statusData.is_active)
+    } catch (error) {
+      console.warn('Could not fetch initial meeting status:', error)
+      // Continue with WebSocket setup anyway
+    } finally {
+      setCheckingStatus(false)
+    }
+    
+    // Then setup WebSocket for real-time updates
     websocketRef.current = connectToMeeting(meetingId, {
       onConnected: () => {
-        console.log('WebSocket connected - checking meeting status')
-        setCheckingStatus(false)
+        console.log('WebSocket connected for status updates')
       },
       onStatus: (statusData) => {
         console.log('Meeting status update:', statusData)
@@ -135,11 +147,9 @@ function EmbeddedApp() {
       },
       onDisconnected: () => {
         console.log('WebSocket disconnected')
-        setCheckingStatus(false)
       },
-      onError: () => {
-        console.log('WebSocket error - bot status unknown')
-        setCheckingStatus(false)
+      onError: (error) => {
+        console.log('WebSocket error:', error)
       }
     })
   }

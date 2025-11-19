@@ -122,3 +122,22 @@ export async function fetchMeetingDetails(meetingUuid) {
   return apiCall('GET', `/meetings/${meetingUuid}`)
 }
 
+/**
+ * Get current meeting status (for checking if bot is active)
+ * @param {string} meetingId - Webex meeting ID
+ * @returns {Promise<Object>} Object with is_active boolean
+ */
+export async function getMeetingStatus(meetingId) {
+  try {
+    const data = await apiCall('GET', `/meetings/${meetingId}`)
+    return { is_active: data.is_active || false }
+  } catch (error) {
+    // If meeting doesn't exist yet (404), treat as inactive
+    if (error.message.includes('404') || error.message.includes('not found')) {
+      console.log('Meeting not found - treating as inactive')
+      return { is_active: false }
+    }
+    throw error
+  }
+}
+

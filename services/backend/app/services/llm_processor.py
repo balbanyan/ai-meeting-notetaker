@@ -110,10 +110,12 @@ async def generate_meeting_summary(meeting_id, db: Session) -> None:
         
         print(f"✅ Meeting summary generated successfully for meeting {meeting_id}")
         
-        # Broadcast summary via WebSocket
+        # Broadcast summary via WebSocket to both IDs
         try:
             from app.api.websocket import manager
-            manager.broadcast_summary_sync(str(meeting_id), llm_response)
+            manager.broadcast_summary_sync(str(meeting_id), llm_response)  # UUID
+            if meeting.webex_meeting_id:
+                manager.broadcast_summary_sync(meeting.webex_meeting_id, llm_response)  # Webex ID
         except Exception as ws_error:
             print(f"⚠️ Failed to broadcast summary via WebSocket: {str(ws_error)}")
         

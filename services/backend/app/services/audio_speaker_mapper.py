@@ -206,7 +206,23 @@ class AudioSpeakerMapper:
                 # Events are ordered, so we can stop once we pass the word time
                 break
         
-        return active_speaker
+        # If found, return it
+        if active_speaker:
+            return active_speaker
+        
+        # Look-ahead: Check if a speaker event exists within a few seconds after -- used for race condition handling in first speaker event
+        # This handles race conditions where transcription completes before speaker events are saved
+        LOOK_AHEAD_WINDOW = timedelta(seconds=5)
+        for event in speaker_events:
+            if event.speaker_started_at > word_time:
+                # If speaker started within 5s after word, assume they were already speaking
+                if event.speaker_started_at <= word_time + LOOK_AHEAD_WINDOW:
+                    logger.debug(f"🔍 Look-ahead: Found speaker event at {event.speaker_started_at} for word at {word_time}")
+                    return event
+                # Events are ordered, so stop if we're past the look-ahead window
+                break
+        
+        return None
     
     def group_words_into_segments(self, word_mapping: List[Dict]) -> List[Dict]:
         """
