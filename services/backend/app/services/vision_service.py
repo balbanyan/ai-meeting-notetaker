@@ -56,7 +56,7 @@ class GroqVisionService:
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Describe what is being presented in this screenshot"
+                                "text": "OCR this screenshot and return the text"
                             },
                             {
                                 "type": "image_url",

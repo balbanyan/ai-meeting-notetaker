@@ -170,15 +170,21 @@ class MultistreamWebexClient {
   async initializeMultistreamWebexAndJoin(meetingUrl) {
     this.logger('🔧 Initializing Webex SDK with multistream in browser...', 'info');
     
-    // Forward console logs from browser
+    // Forward console logs from browser (selective filtering)
       this.page.on('console', msg => {
         const type = msg.type();
         const text = msg.text();
         
-        // Forward Webex, Media, Connection, and Debug logs
-        if (text.includes('Webex') || text.includes('Meeting') || text.includes('Media') || 
-            text.includes('addMedia') || text.includes('Connection') || text.includes('🌐') ||
-            text.includes('[DEBUG]') || text.includes('candidate')) {
+        // Keep only: timing logs, connection info, DEBUG logs, and key milestones
+        const isTimingLog = /\(\d+(ms|s)\)/.test(text);
+        const isConnectionLog = text.startsWith('🌐 Connection:');
+        const isDebugLog = text.includes('[DEBUG]');
+        const isMilestone = text.includes('✅') || text.includes('❌');
+        const isCriticalStep = text.includes('Starting Webex SDK') || 
+                               text.includes('Joining meeting') || 
+                               text.includes('Starting addMedia');
+        
+        if (isTimingLog || isConnectionLog || isDebugLog || isMilestone || isCriticalStep) {
           if (type === 'error') {
             this.logger(`[Browser Console ERROR] ${text}`, 'error');
           } else if (type === 'warning') {
