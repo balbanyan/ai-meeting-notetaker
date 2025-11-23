@@ -89,6 +89,22 @@ class AudioSpeakerMapper:
             
             logger.info(f"✅ Speaker mapping completed: {len(segments)} segments created for chunk UUID: {audio_chunk_id}")
             
+            # 8. Check if we should trigger non-voting checkpoint
+            from app.core.config import settings
+            if settings.enable_non_voting and chunk.chunk_id % settings.non_voting_call_frequency == 0:
+                from app.services.palantir_service import palantir_service
+                import asyncio
+                
+                # Trigger checkpoint asynchronously (don't block audio processing)
+                asyncio.create_task(
+                    palantir_service.trigger_non_voting_checkpoint(
+                        str(chunk.meeting_id), 
+                        chunk.chunk_id, 
+                        self.db
+                    )
+                )
+                logger.info(f"🎯 Non-voting checkpoint triggered at chunk {chunk.chunk_id}")
+            
         except Exception as e:
             logger.error(f"❌ Speaker mapping failed for chunk UUID: {audio_chunk_id}: {str(e)}")
             raise e

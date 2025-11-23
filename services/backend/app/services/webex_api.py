@@ -314,4 +314,84 @@ class WebexMeetingsAPI:
         except Exception as e:
             print(f"❌ Failed to get complete meeting data: {str(e)}")
             raise
+    
+    async def find_meeting_id_by_link(self, meeting_link: str) -> Optional[str]:
+        """
+        Find meeting_id by matching webLink using List Meetings by Admin API.
+        
+        Args:
+            meeting_link: Full Webex meeting URL
+            
+        Returns:
+            meeting_id (str) if found, None otherwise
+            
+        Workflow:
+            1. GET /meetings (List Meetings by Admin)
+            2. Filter results where webLink == meeting_link
+            3. Return matching meeting's id
+        """
+        try:
+            print(f"🔍 Finding meeting by link...")
+            
+            access_token = await self._get_access_token()
+            
+            # Call List Meetings by Admin API with webLink parameter
+            # The API requires either meetingNumber or webLink as a filter
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.base_url}/admin/meetings",
+                    params={
+                        "webLink": meeting_link  # Search directly by webLink
+                    },
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json"
+                    }
+                )
+                
+                if response.status_code != 200:
+                    error_detail = response.text
+                    print(f"❌ List Meetings API failed: {response.status_code}")
+                    print(f"   Error details: {error_detail}")
+                    return None
+                
+                data = response.json()
+                meetings = data.get("items", [])
+                print(f"📋 Found {len(meetings)} meeting(s) for link")
+                
+                # Should return exactly one meeting
+                if meetings:
+                    meeting_id = meetings[0]["id"]
+                    print(f"✅ Found meeting")
+                    return meeting_id
+                else:
+                    print(f"❌ No meeting found with webLink")
+                    return None
+                
+        except Exception as e:
+            print(f"❌ Error finding meeting by link: {str(e)}")
+            return None
+    
+    async def get_complete_meeting_data_by_link(self, meeting_link: str) -> Dict:
+        """
+        Get complete meeting data starting from link only.
+        
+        Workflow:
+            1. find_meeting_id_by_link() to get meeting_id
+            2. Use EXISTING get_complete_meeting_data(meeting_id) method
+               - Calls GET /meetings/{id} (admin API)
+               - Calls GET /meetings?meetingNumber&hostEmail (for webLink)
+               - Calls GET /meeting-invitees (for participants/cohosts)
+               - Returns all metadata in same format
+        """
+        print(f"🔗 Getting complete meeting data from link...")
+        
+        # Step 1: Find meeting_id from link
+        meeting_id = await self.find_meeting_id_by_link(meeting_link)
+        
+        if not meeting_id:
+            raise Exception(f"No meeting found with the provided link")
+        
+        # Step 2: Use existing method (same as current workflow)
+        return await self.get_complete_meeting_data(meeting_id)
 

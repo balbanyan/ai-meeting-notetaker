@@ -47,6 +47,7 @@ class Meeting(Base):
     speaker_events = relationship("SpeakerEvent", back_populates="meeting")
     speaker_transcripts = relationship("SpeakerTranscript", back_populates="meeting")
     screenshare_captures = relationship("ScreenshareCapture", back_populates="meeting")
+    non_voting_responses = relationship("NonVotingAssistantResponse", back_populates="meeting")
     
     def __repr__(self):
         return f"<Meeting(id={self.id}, webex_meeting_id={self.webex_meeting_id}, host_email={self.host_email})>"

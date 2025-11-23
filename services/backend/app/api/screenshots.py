@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, BackgroundTasks
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
@@ -170,3 +171,25 @@ async def get_screenshots(meeting_id: str, db: Session = Depends(get_db)):
         ScreenshareCapture.meeting_id == meeting_id
     ).all()
     return screenshots
+
+
+@router.get("/screenshots/image/{screenshot_id}")
+async def get_screenshot_image(screenshot_id: str, db: Session = Depends(get_db)):
+    """
+    Serve screenshot PNG image by ID.
+    Used by external applications to fetch screenshot images via URL reference.
+    """
+    screenshot = db.query(ScreenshareCapture).filter(
+        ScreenshareCapture.id == screenshot_id
+    ).first()
+    
+    if not screenshot:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    
+    if not screenshot.screenshot_image:
+        raise HTTPException(status_code=404, detail="Screenshot image data not available")
+    
+    return Response(
+        content=screenshot.screenshot_image,
+        media_type="image/png"
+    )

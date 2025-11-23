@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     live_demo_url: str = ""
     send_palantir: bool = False
     
+    # Non-Voting Assistant API Settings
+    enable_non_voting: bool = False
+    non_voting_assistant_url: str = ""
+    non_voting_call_frequency: int = 20  # Call every N chunks
+    
     class Config:
         env_file = ".env"
         extra = "ignore"  # Ignore bot-runner specific env vars

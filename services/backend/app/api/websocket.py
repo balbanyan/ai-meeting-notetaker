@@ -122,6 +122,27 @@ class ConnectionManager:
         else:
             logger.warning(f"⚠️ Cannot broadcast summary - no main loop available")
     
+    async def broadcast_non_voting_assistant(self, meeting_id: str, response_data: dict):
+        """Broadcast non-voting assistant response to all subscribers"""
+        message = {
+            "type": "non_voting_assistant",
+            "data": response_data
+        }
+        await self.broadcast_to_meeting(meeting_id, message)
+        logger.info(f"📤 Broadcast non-voting assistant response to meeting {meeting_id}")
+    
+    def broadcast_non_voting_assistant_sync(self, meeting_id: str, response_data: dict):
+        """Thread-safe synchronous version of broadcast_non_voting_assistant"""
+        global _main_loop
+        if _main_loop and _main_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self.broadcast_non_voting_assistant(meeting_id, response_data),
+                _main_loop
+            )
+            logger.debug(f"📡 Scheduled non-voting assistant broadcast for meeting {meeting_id}")
+        else:
+            logger.warning(f"⚠️ Cannot broadcast non-voting assistant - no main loop available")
+    
     async def broadcast_status(self, meeting_id: str, is_active: bool):
         """Broadcast meeting status change to all subscribers"""
         message = {
