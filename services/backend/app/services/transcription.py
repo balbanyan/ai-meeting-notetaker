@@ -168,11 +168,11 @@ async def transcribe_chunk_async(chunk_uuid: str):
                     from app.services.audio_speaker_mapper import AudioSpeakerMapper
                     mapper = AudioSpeakerMapper()
                     await mapper.process_completed_transcript(str(chunk.id))
-                    logger.info(f"🗣️ Speaker mapping completed for chunk UUID: {chunk.id}")
+                    logger.info(f"🗣️ Speaker mapping completed - Meeting: {chunk.meeting_id}, Chunk UUID: {chunk.id}")
                 except Exception as mapping_error:
-                    logger.error(f"❌ Speaker mapping failed for chunk UUID: {chunk.id}: {str(mapping_error)}")
+                    logger.error(f"❌ Speaker mapping failed - Meeting: {chunk.meeting_id}, Chunk UUID: {chunk.id}: {str(mapping_error)}")
             else:
-                logger.info(f"⚠️ Skipping speaker mapping - missing transcript or timing data for chunk UUID: {chunk.id}")
+                logger.info(f"⚠️ Skipping speaker mapping - missing transcript or timing data - Meeting: {chunk.meeting_id}, Chunk UUID: {chunk.id}")
         else:
             chunk.transcription_status = "failed"
             db.commit()

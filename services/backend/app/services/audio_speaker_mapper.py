@@ -71,7 +71,6 @@ class AudioSpeakerMapper:
             
             # 4. Get all speaker events for this meeting (not just this chunk)
             speaker_events = self.get_speaker_events_for_meeting(chunk.meeting_id)
-            logger.info(f"🔍 Found {len(speaker_events)} speaker events for meeting")
             
             # 5. Map words to speakers
             word_speaker_mapping = self.map_words_to_speakers(
@@ -91,7 +90,18 @@ class AudioSpeakerMapper:
             
             # 8. Check if we should trigger non-voting checkpoint
             from app.core.config import settings
-            if settings.enable_non_voting and chunk.chunk_id % settings.non_voting_call_frequency == 0:
+            from app.models.meeting import Meeting
+            
+            # Check meeting-specific settings (which may have overridden .env)
+            meeting = self.db.query(Meeting).filter(Meeting.id == chunk.meeting_id).first()
+            if meeting:
+                meeting_non_voting_enabled = meeting.non_voting_enabled
+                meeting_call_frequency = meeting.non_voting_call_frequency or settings.non_voting_call_frequency
+            else:
+                meeting_non_voting_enabled = False
+                meeting_call_frequency = settings.non_voting_call_frequency
+            
+            if meeting_non_voting_enabled and chunk.chunk_id % meeting_call_frequency == 0:
                 from app.services.palantir_service import palantir_service
                 import asyncio
                 
@@ -103,7 +113,7 @@ class AudioSpeakerMapper:
                         self.db
                     )
                 )
-                logger.info(f"🎯 Non-voting checkpoint triggered at chunk {chunk.chunk_id}")
+                logger.info(f"🎯 Non-voting checkpoint triggered for meeting {chunk.meeting_id} at chunk {chunk.chunk_id}")
             
         except Exception as e:
             logger.error(f"❌ Speaker mapping failed for chunk UUID: {audio_chunk_id}: {str(e)}")
@@ -285,8 +295,6 @@ class AudioSpeakerMapper:
         # Don't forget the last segment
         if current_segment:
             segments.append(current_segment)
-        
-        logger.info(f"📊 Grouped {len(word_mapping)} words into {len(segments)} speaker segments")
         
         return segments
     

@@ -2,6 +2,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+
+# Reduce noise from third-party loggers
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # Import routers
 from app.api.health import router as health_router
@@ -13,6 +27,16 @@ from app.api.websocket import router as websocket_router
 
 # Import database setup
 from app.core.database import create_tables, reset_database
+
+# Import all models to ensure they're registered with SQLAlchemy
+from app.models import (
+    Meeting, 
+    AudioChunk, 
+    SpeakerEvent, 
+    SpeakerTranscript, 
+    ScreenshareCapture,
+    NonVotingAssistantResponse
+)
 
 # Import bot-runner manager
 from app.bot_runner import bot_runner_manager

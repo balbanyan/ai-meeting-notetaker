@@ -42,7 +42,7 @@ async def save_speaker_started_event(
         db.commit()
         db.refresh(speaker_event)
         
-        print(f"🗣️ SPEAKER EVENT SAVED - Time: {event_data.speaker_started_at}")
+        print(f"🗣️ SPEAKER EVENT SAVED - Meeting UUID: {event_data.meeting_id}, Time: {event_data.speaker_started_at}")
         
         return SpeakerEventResponse(
             status="saved",

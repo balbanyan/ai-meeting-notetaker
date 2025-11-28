@@ -41,7 +41,7 @@ class BackendClient {
         }
       });
 
-      console.log(`✅ CHUNK SENT - Chunk: ${chunkId}, Status: ${response.data.status}`);
+      console.log(`✅ CHUNK SENT - Meeting: ${meetingId}, Chunk: ${chunkId}, Chunk UUID: ${response.data.chunk_id}, Status: ${response.data.status}`);
       
       // For Electron: also log to UI if addLog function is available
       if (typeof window !== 'undefined' && window.addLog) {
@@ -51,7 +51,7 @@ class BackendClient {
       return response.data;
 
     } catch (error) {
-      console.error(`❌ CHUNK SEND FAILED - Chunk: ${chunkId}`, error.response?.data || error.message);
+      console.error(`❌ CHUNK SEND FAILED - Meeting: ${meetingId}, Chunk: ${chunkId}`, error.response?.data || error.message);
       throw error;
     }
   }
@@ -90,7 +90,7 @@ class BackendClient {
         }
       });
 
-      console.log(`✅ SPEAKER EVENT SENT`);
+      console.log(`✅ SPEAKER EVENT SENT (Meeting UUID: ${eventData.meeting_id})`);
       
       // For Electron: also log to UI if addLog function is available
       if (typeof window !== 'undefined' && window.addLog) {
@@ -128,12 +128,12 @@ class BackendClient {
         }
       });
 
-      console.log(`✅ SCREENSHOT SENT - Chunk: ${chunkId}, Status: ${response.data.status}`);
+      console.log(`✅ SCREENSHOT SENT - Meeting: ${meetingId}, Screenshot Chunk: ${chunkId}, Audio Chunk UUID: ${audioChunkId}, Status: ${response.data.status}`);
       
       return response.data;
 
     } catch (error) {
-      console.error(`❌ SCREENSHOT SEND FAILED - Chunk: ${chunkId}`, error.response?.data || error.message);
+      console.error(`❌ SCREENSHOT SEND FAILED - Meeting: ${meetingId}, Screenshot Chunk: ${chunkId}`, error.response?.data || error.message);
       throw error;
     }
   }

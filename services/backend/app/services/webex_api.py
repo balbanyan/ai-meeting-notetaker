@@ -265,7 +265,7 @@ class WebexMeetingsAPI:
             }
         """
         try:
-            print(f"📋 Fetching complete meeting data for meeting_id: {meeting_id}")
+            print(f"📋 Fetching complete meeting data from Webex")
             
             # Step 1: Get admin metadata
             admin_data = await self.get_meeting_by_id_admin(meeting_id)
@@ -314,7 +314,7 @@ class WebexMeetingsAPI:
         except Exception as e:
             print(f"❌ Failed to get complete meeting data: {str(e)}")
             raise
-    
+
     async def find_meeting_id_by_link(self, meeting_link: str) -> Optional[str]:
         """
         Find meeting_id by matching webLink using List Meetings by Admin API.

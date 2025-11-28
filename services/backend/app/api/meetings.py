@@ -59,6 +59,8 @@ class RegisterAndJoinRequest(BaseModel):
 
 class RegisterAndJoinWithLinkRequest(BaseModel):
     meeting_link: str  # Full Webex meeting URL
+    enable_non_voting: Optional[bool] = None  # Enable non-voting assistant (overrides .env if provided)
+    non_voting_call_frequency: Optional[int] = None  # Chunks between calls (overrides .env if provided)
 
 
 class RegisterAndJoinResponse(BaseModel):
@@ -66,6 +68,11 @@ class RegisterAndJoinResponse(BaseModel):
     webex_meeting_id: str
     status: str
     message: str
+
+
+class RegisterAndJoinByLinkResponse(BaseModel):
+    meeting_uuid: str
+    status: str
 
 
 @router.post("/meetings/register-and-join", response_model=RegisterAndJoinResponse)
@@ -89,7 +96,21 @@ async def register_and_join_meeting(
     try:
         print(f"📱 REGISTER AND JOIN - Meeting ID: {request.meeting_id}")
         
-        # Initialize Webex API client
+        # Step 1: Check if bot is already active BEFORE making expensive API calls
+        existing_meeting = db.query(Meeting).filter(
+            Meeting.webex_meeting_id == request.meeting_id
+        ).first()
+        
+        if existing_meeting and existing_meeting.is_active:
+            meeting_uuid = str(existing_meeting.id)
+            print(f"⚠️ Bot is already active in this meeting (Meeting UUID: {meeting_uuid})")
+            raise HTTPException(
+                status_code=409,
+                detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
+            )
+        
+        # Step 2: Now fetch complete meeting data from Webex (only if bot not already active)
+        print(f"🌐 Fetching complete meeting data from Webex APIs...")
         from app.services.webex_api import WebexMeetingsAPI
         webex_api = WebexMeetingsAPI(
             client_id=settings.webex_client_id,
@@ -98,8 +119,6 @@ async def register_and_join_meeting(
             personal_token=settings.webex_personal_access_token
         )
         
-        # Get complete meeting data from Webex APIs
-        print(f"🌐 Fetching complete meeting data from Webex APIs...")
         meeting_data = await webex_api.get_complete_meeting_data(request.meeting_id)
         
         # Extract data from API response
@@ -125,17 +144,16 @@ async def register_and_join_meeting(
         except (ValueError, AttributeError) as e:
             print(f"⚠️ Could not parse end_time: {e}")
         
-        # Check if meeting already exists
-        existing_meeting = db.query(Meeting).filter(
-            Meeting.webex_meeting_id == request.meeting_id
-        ).first()
-        
+        # Update existing meeting or create new one
+        # Note: existing_meeting was already fetched and is_active was checked earlier
         if existing_meeting:
-            # Update existing meeting
+            # Update existing meeting (we already know it's not active)
             print(f"🔄 Meeting exists - updating (UUID: {existing_meeting.id})")
             
             existing_meeting.is_active = True
-            existing_meeting.actual_join_time = datetime.utcnow()
+            # Only set actual_join_time on first join, not on rejoins
+            if not existing_meeting.actual_join_time:
+                existing_meeting.actual_join_time = datetime.utcnow()
             existing_meeting.participant_emails = participant_emails
             existing_meeting.cohost_emails = cohost_emails
             existing_meeting.host_email = host_email
@@ -198,16 +216,18 @@ async def register_and_join_meeting(
             print(f"📡 Broadcasted bot active status to WebSocket subscribers (Webex ID + UUID)")
         
         # Trigger bot join via bot-runner
-        print(f"🤖 Triggering bot join with API-retrieved webLink...")
+        print(f"🤖 Triggering bot join with API-retrieved webLink (Meeting UUID: {meeting_uuid})...")
         
         # Ensure bot-runner subprocess is running (start on-demand if needed)
         if not bot_runner_manager.is_running():
-            print("🔄 Bot-runner not running, starting now...")
+            print(f"🔄 Bot-runner not running, starting now (Meeting UUID: {meeting_uuid})...")
             if not bot_runner_manager.start():
                 raise HTTPException(
                     status_code=503, 
                     detail="Bot-runner service failed to start"
                 )
+        else:
+            print(f"✅ Bot-runner already running (Meeting UUID: {meeting_uuid})")
         
         # Wait for bot-runner to be ready (async, non-blocking)
         if not await wait_for_bot_runner_ready(max_wait_seconds=20):
@@ -219,7 +239,7 @@ async def register_and_join_meeting(
         bot_runner_url = f"{settings.bot_runner_url}/join"
         
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=150.0) as client:  # Increased to 150s (bot-runner has 120s timeout + buffer)
                 payload = {
                     "meetingUrl": meeting_link,  # Use API-retrieved webLink
                     "meetingUuid": meeting_uuid,  # Pass meeting UUID from database
@@ -276,7 +296,7 @@ async def register_and_join_meeting(
         raise HTTPException(status_code=500, detail=f"Failed to register meeting: {str(e)}")
 
 
-@router.post("/meetings/register-and-join-with-link", response_model=RegisterAndJoinResponse)
+@router.post("/meetings/register-and-join-with-link", response_model=RegisterAndJoinByLinkResponse)
 async def register_and_join_meeting_with_link(
     request: RegisterAndJoinWithLinkRequest,
     db: Session = Depends(get_db)
@@ -311,9 +331,34 @@ async def register_and_join_meeting_with_link(
             personal_token=settings.webex_personal_access_token
         )
         
-        # Get complete meeting data from link (uses existing methods)
-        print(f"🌐 Finding and fetching meeting data from link...")
-        meeting_data = await webex_api.get_complete_meeting_data_by_link(request.meeting_link)
+        # Step 1: Find meeting_id from link first (lightweight check)
+        print(f"🔍 Finding meeting by link...")
+        webex_meeting_id = await webex_api.find_meeting_id_by_link(request.meeting_link)
+        
+        if not webex_meeting_id:
+            raise HTTPException(
+                status_code=404,
+                detail="No meeting found with the provided link"
+            )
+        
+        print(f"✅ Found meeting")
+        
+        # Step 2: Check if bot is already active BEFORE making expensive API calls
+        existing_meeting = db.query(Meeting).filter(
+            Meeting.webex_meeting_id == webex_meeting_id
+        ).first()
+        
+        if existing_meeting and existing_meeting.is_active:
+            meeting_uuid = str(existing_meeting.id)
+            print(f"⚠️ Bot is already active in this meeting (Meeting UUID: {meeting_uuid})")
+            raise HTTPException(
+                status_code=409,
+                detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
+            )
+        
+        # Step 3: Now fetch complete meeting data (only if bot not already active)
+        print(f"📋 Fetching complete meeting data from Webex")
+        meeting_data = await webex_api.get_complete_meeting_data(webex_meeting_id)
         
         # Extract data from API response (same as register_and_join_meeting)
         meeting_link = meeting_data["meeting_link"]
@@ -322,7 +367,6 @@ async def register_and_join_meeting_with_link(
         host_email = meeting_data["host_email"]
         participant_emails = meeting_data.get("participant_emails", [])
         cohost_emails = meeting_data.get("cohost_emails", [])
-        webex_meeting_id = meeting_data["webex_meeting_id"]
         
         # Parse datetime strings
         scheduled_start = None
@@ -339,14 +383,12 @@ async def register_and_join_meeting_with_link(
         except (ValueError, AttributeError) as e:
             print(f"⚠️ Could not parse end_time: {e}")
         
-        # Check if meeting already exists
-        existing_meeting = db.query(Meeting).filter(
-            Meeting.webex_meeting_id == webex_meeting_id
-        ).first()
-        
+        # Update existing meeting or create new one
+        # Note: existing_meeting was already fetched and is_active was checked earlier
         if existing_meeting:
-            # Update existing meeting
-            print(f"📝 Meeting exists - updating record")
+            # Update existing meeting (we already know it's not active)
+            meeting_uuid = str(existing_meeting.id)
+            print(f"📝 Meeting exists - updating record (Meeting UUID: {meeting_uuid})")
             existing_meeting.meeting_link = meeting_link
             existing_meeting.meeting_title = meeting_title
             existing_meeting.host_email = host_email
@@ -355,14 +397,17 @@ async def register_and_join_meeting_with_link(
             existing_meeting.scheduled_start_time = scheduled_start
             existing_meeting.scheduled_end_time = scheduled_end
             existing_meeting.meeting_type = meeting_data.get("meeting_type")
-            existing_meeting.screenshots_enabled = False  # Always disabled
+            existing_meeting.screenshots_enabled = settings.enable_screenshots  # Use .env setting
+            # API parameters override .env if provided, otherwise use .env
+            existing_meeting.non_voting_enabled = request.enable_non_voting if request.enable_non_voting is not None else settings.enable_non_voting
+            existing_meeting.non_voting_call_frequency = request.non_voting_call_frequency if request.non_voting_call_frequency is not None else settings.non_voting_call_frequency
             existing_meeting.is_active = True
-            existing_meeting.actual_join_time = datetime.utcnow()
+            # Only set actual_join_time on first join, not on rejoins
+            if not existing_meeting.actual_join_time:
+                existing_meeting.actual_join_time = datetime.utcnow()
             
             db.commit()
             db.refresh(existing_meeting)
-            
-            meeting_uuid = str(existing_meeting.id)
         else:
             # Create new meeting
             print(f"✨ Creating new meeting record")
@@ -377,7 +422,10 @@ async def register_and_join_meeting_with_link(
                 scheduled_start_time=scheduled_start,
                 scheduled_end_time=scheduled_end,
                 meeting_type=meeting_data.get("meeting_type"),
-                screenshots_enabled=False,  # Always disabled
+                screenshots_enabled=settings.enable_screenshots,  # Use .env setting
+                # API parameters override .env if provided, otherwise use .env
+                non_voting_enabled=request.enable_non_voting if request.enable_non_voting is not None else settings.enable_non_voting,
+                non_voting_call_frequency=request.non_voting_call_frequency if request.non_voting_call_frequency is not None else settings.non_voting_call_frequency,
                 is_active=True,
                 actual_join_time=datetime.utcnow()
             )
@@ -387,20 +435,23 @@ async def register_and_join_meeting_with_link(
             db.refresh(new_meeting)
             
             meeting_uuid = str(new_meeting.id)
+            print(f"✨ New meeting created (Meeting UUID: {meeting_uuid})")
         
-        print(f"✅ Meeting registered")
+        print(f"✅ Meeting registered (Meeting UUID: {meeting_uuid})")
         
         # Trigger bot join
-        print(f"🤖 Triggering bot join...")
+        print(f"🤖 Triggering bot join (Meeting UUID: {meeting_uuid})...")
         
         # Ensure bot-runner subprocess is running
         if not bot_runner_manager.is_running():
-            print("🔄 Bot-runner not running, starting now...")
+            print(f"🔄 Bot-runner not running, starting now (Meeting UUID: {meeting_uuid})...")
             if not bot_runner_manager.start():
                 raise HTTPException(
                     status_code=503, 
                     detail="Bot-runner service failed to start"
                 )
+        else:
+            print(f"✅ Bot-runner already running (Meeting UUID: {meeting_uuid})")
         
         # Wait for bot-runner to be ready
         if not await wait_for_bot_runner_ready(max_wait_seconds=20):
@@ -412,7 +463,7 @@ async def register_and_join_meeting_with_link(
         bot_runner_url = f"{settings.bot_runner_url}/join"
         
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=150.0) as client:  # Increased to 150s (bot-runner has 120s timeout + buffer)
                 bot_payload = {
                     "meetingUrl": meeting_link,
                     "meetingUuid": meeting_uuid,
@@ -429,13 +480,11 @@ async def register_and_join_meeting_with_link(
                     bot_data = bot_response.json()
                     
                     if bot_data.get("success"):
-                        print(f"✅ Bot successfully triggered to join")
+                        print(f"✅ Bot successfully triggered to join (Meeting UUID: {meeting_uuid})")
                         
-                        return RegisterAndJoinResponse(
+                        return RegisterAndJoinByLinkResponse(
                             meeting_uuid=meeting_uuid,
-                            webex_meeting_id=webex_meeting_id,
-                            status="success",
-                            message="Meeting registered and bot join triggered successfully"
+                            status="Bot triggered successfully"
                         )
                     else:
                         error_msg = bot_data.get("error", "Unknown error from bot-runner")
@@ -516,9 +565,20 @@ async def test_join_meeting(
         ).first()
         
         if existing_meeting:
+            # Check if bot is already active in this meeting
+            if existing_meeting.is_active:
+                meeting_uuid = str(existing_meeting.id)
+                print(f"⚠️ Bot is already active in this test meeting (Meeting UUID: {meeting_uuid})")
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
+                )
+            
             print(f"🔄 Test meeting exists - reactivating (UUID: {existing_meeting.id})")
             existing_meeting.is_active = True
-            existing_meeting.actual_join_time = datetime.utcnow()
+            # Only set actual_join_time on first join, not on rejoins
+            if not existing_meeting.actual_join_time:
+                existing_meeting.actual_join_time = datetime.utcnow()
             db.commit()
             db.refresh(existing_meeting)
             meeting_uuid = str(existing_meeting.id)
@@ -544,16 +604,18 @@ async def test_join_meeting(
             print(f"✅ Test meeting created - UUID: {meeting_uuid}")
         
         # Trigger bot-runner
-        print(f"🤖 Triggering bot-runner for testing...")
+        print(f"🤖 Triggering bot-runner for testing (Meeting UUID: {meeting_uuid})...")
         
         # Ensure bot-runner subprocess is running (start on-demand if needed)
         if not bot_runner_manager.is_running():
-            print("🔄 Bot-runner not running, starting now...")
+            print(f"🔄 Bot-runner not running, starting now (Meeting UUID: {meeting_uuid})...")
             if not bot_runner_manager.start():
                 raise HTTPException(
                     status_code=503,
                     detail="Bot-runner service failed to start"
                 )
+        else:
+            print(f"✅ Bot-runner already running (Meeting UUID: {meeting_uuid})")
         
         # Wait for bot-runner to be ready (async, non-blocking)
         if not await wait_for_bot_runner_ready(max_wait_seconds=20):
@@ -565,7 +627,7 @@ async def test_join_meeting(
         bot_runner_url = f"{settings.bot_runner_url}/join"
         
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=150.0) as client:  # Increased to 150s (bot-runner has 120s timeout + buffer)
                 payload = {
                     "meetingUrl": request.meeting_url,
                     "meetingUuid": meeting_uuid,  # Pass UUID so chunks/speakers work

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, func, JSON, Text
+from sqlalchemy import Column, String, Boolean, DateTime, func, JSON, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 import uuid
@@ -37,6 +37,8 @@ class Meeting(Base):
     
     # Feature Flags
     screenshots_enabled = Column(Boolean, default=False, index=True)  # Whether screenshots were enabled for this meeting
+    non_voting_enabled = Column(Boolean, default=False, index=True)  # Whether non-voting assistant is enabled for this meeting
+    non_voting_call_frequency = Column(Integer, default=20)  # Chunks between non-voting assistant calls
     
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())

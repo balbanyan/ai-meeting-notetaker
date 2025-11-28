@@ -12,7 +12,6 @@ const config = {
   // Bot Configuration
   bot: {
     displayName: process.env.BOT_DISPLAY_NAME || 'AI Meeting Notetaker',
-    email: process.env.BOT_EMAIL || 'ai-notetaker@yourcompany.com',
     serviceToken: process.env.BOT_SERVICE_TOKEN,
   },
   

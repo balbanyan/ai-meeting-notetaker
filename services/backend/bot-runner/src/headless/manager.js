@@ -110,9 +110,10 @@ class HeadlessRunner {
         const useMultistream = enableMultistream !== undefined ? enableMultistream : this.enableMultistream;
         const clientType = useMultistream ? 'multistream' : 'legacy';
         
-        console.log(`📞 Join meeting request received (${clientType} mode)`);
+        const uuidInfo = meetingUuid ? ` (Meeting UUID: ${meetingUuid})` : '';
+        console.log(`📞 Join meeting request received (${clientType} mode)${uuidInfo}`);
         if (meetingUuid) {
-          console.log(`📋 Meeting UUID provided: ${meetingUuid} (embedded app workflow)`);
+          console.log(`📋 Embedded app workflow - Meeting UUID: ${meetingUuid}`);
         }
         
         // Create new page for this meeting
@@ -142,59 +143,74 @@ class HeadlessRunner {
         // Generate temporary meeting ID for tracking
         const tempMeetingId = meetingUuid || `meeting_${Date.now()}`;
         
-        // Respond immediately - join will happen in background
-        res.json({ 
-          success: true, 
-          meetingId: tempMeetingId,
-          clientType,
-          message: `Meeting join initiated with ${clientType} client`
-        });
-        
-        // Join the meeting asynchronously (don't await - let it run in background)
+        // Join the meeting and wait for result before responding
         // If meetingUuid provided (embedded app workflow), pass it to multistream client
-        (async () => {
-          try {
-            let result;
-            if (useMultistream && meetingUuid) {
-              result = await webexClient.joinMeeting(meetingUrl, meetingUuid, hostEmail);
-            } else {
-              // Legacy flow - client will fetch and register itself
-              result = await webexClient.joinMeeting(meetingUrl);
-            }
+        try {
+          let result;
+          if (useMultistream && meetingUuid) {
+            result = await webexClient.joinMeeting(meetingUrl, meetingUuid, hostEmail);
+          } else {
+            // Legacy flow - client will fetch and register itself
+            result = await webexClient.joinMeeting(meetingUrl);
+          }
+          
+          // Check if join was actually successful
+          if (result && result.success !== false) {
+            // Store meeting session
+            const meetingId = result.meetingId || tempMeetingId;
+            this.activeMeetings.set(meetingId, { 
+              page, 
+              webexClient, 
+              meetingUrl,
+              clientType,
+              startTime: new Date().toISOString()
+            });
             
-            // Check if join was actually successful
-            if (result && result.success !== false) {
-              // Store meeting session
-              const meetingId = result.meetingId || tempMeetingId;
-              this.activeMeetings.set(meetingId, { 
-                page, 
-                webexClient, 
-                meetingUrl,
-                clientType,
-                startTime: new Date().toISOString()
-              });
-              
-              console.log(`✅ Meeting joined successfully - ID: ${meetingId}`);
-            } else {
-              // Join failed - error already logged by client
-              console.error(`❌ Meeting join failed: ${result?.error || 'Unknown error'}`);
-              // Clean up page
-              try {
-                await page.close();
-              } catch (closeError) {
-                console.error('❌ Error closing page after failed join:', closeError);
-              }
-            }
-          } catch (error) {
-            console.error('❌ Background join error (exception):', error);
-            // Clean up page if join fails
+            console.log(`✅ Meeting joined successfully - ID: ${meetingId}`);
+            
+            // Respond with success
+            res.json({ 
+              success: true, 
+              meetingId: meetingId,
+              clientType,
+              message: `Meeting joined successfully with ${clientType} client`
+            });
+          } else {
+            // Join failed - error already logged by client
+            const errorMsg = result?.error || 'Unknown error';
+            console.error(`❌ Meeting join failed: ${errorMsg}`);
+            
+            // Clean up page
             try {
               await page.close();
             } catch (closeError) {
               console.error('❌ Error closing page after failed join:', closeError);
             }
+            
+            // Respond with failure
+            res.status(500).json({ 
+              success: false, 
+              error: errorMsg,
+              message: `Failed to join meeting: ${errorMsg}`
+            });
           }
-        })();
+        } catch (error) {
+          console.error('❌ Join error (exception):', error);
+          
+          // Clean up page if join fails
+          try {
+            await page.close();
+          } catch (closeError) {
+            console.error('❌ Error closing page after failed join:', closeError);
+          }
+          
+          // Respond with failure
+          res.status(500).json({ 
+            success: false, 
+            error: error.message,
+            message: `Failed to join meeting: ${error.message}`
+          });
+        }
         
       } catch (error) {
         console.error('❌ Join meeting error:', error);

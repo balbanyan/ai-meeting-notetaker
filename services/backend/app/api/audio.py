@@ -84,12 +84,12 @@ async def save_audio_chunk(
         elif audio_data[:4] == b'RIFF':  # WAV signature
             format_info = ", Format: WAV"
             
-        print(f"💾 CHUNK SAVED - Chunk #{chunk_count}, UUID: {chunk_id}, Size: {len(audio_data)} bytes{format_info}")
+        print(f"💾 CHUNK SAVED - Meeting: {meeting_id}, Chunk #{chunk_count}, Chunk UUID: {chunk.id}, Size: {len(audio_data)} bytes{format_info}")
         
         # Trigger background transcription (Immediate Processing)
         from app.services.transcription import transcribe_chunk_async
         background_tasks.add_task(transcribe_chunk_async, str(chunk.id))
-        print(f"🔄 TRANSCRIPTION QUEUED - Chunk UUID: {chunk.id}")
+        print(f"🔄 TRANSCRIPTION QUEUED - Meeting: {meeting_id}, Chunk UUID: {chunk.id}")
         
         return SaveChunkResponse(
             status="saved",

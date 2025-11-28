@@ -104,7 +104,8 @@ class PalantirService:
         self,
         meeting_summary: str,
         recent_transcription: str,
-        shown_slide: str
+        shown_slide: str,
+        meeting_id: str = None
     ) -> Optional[dict]:
         """
         Send incremental data to Non-Voting Assistant API.
@@ -113,6 +114,7 @@ class PalantirService:
             meeting_summary: Summary of meeting (can be recent or cumulative)
             recent_transcription: NEW transcripts since last call (formatted)
             shown_slide: NEW unique slide summaries since last call
+            meeting_id: Optional meeting UUID for logging
             
         Returns:
             dict with suggested_questions, quotes, strategic_interventions, non_voting_opinions
@@ -139,9 +141,11 @@ class PalantirService:
                 "Authorization": f"Bearer {self.token}"
             }
             
-            logger.info(f"📤 Sending non-voting request to Palantir")
+            meeting_log = f" (Meeting: {meeting_id})" if meeting_id else ""
+            logger.info(f"📤 Sending non-voting request to Palantir API{meeting_log}")
+            logger.debug(f"   Payload size - Summary: {len(meeting_summary)} chars, Transcription: {len(recent_transcription)} chars, Slides: {len(shown_slide)} chars")
             
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     settings.non_voting_assistant_url,
                     json=payload,
@@ -149,20 +153,33 @@ class PalantirService:
                 )
             
             if response.status_code in [200, 201]:
-                logger.info(f"✅ Successfully received non-voting assistant response")
-                return response.json()
+                response_data = response.json()
+                response_value = response_data.get('value', {})
+                meeting_log = f" (Meeting: {meeting_id})" if meeting_id else ""
+                logger.info(f"✅ Successfully received non-voting assistant response{meeting_log}")
+                logger.info(f"   Response contains: {len(response_value.get('suggested_questions', []))} questions, {len(response_value.get('quotes', []))} quotes, {len(response_value.get('engagement_points', []))} engagement points, {len(response_value.get('non_voting_opinions', []))} opinions{meeting_log}")
+                return response_data
             else:
-                logger.error(f"❌ Non-voting API returned status {response.status_code}: {response.text}")
+                logger.error(f"❌ Non-voting API returned status {response.status_code}")
+                logger.error(f"   Response: {response.text[:500]}")  # First 500 chars
                 return None
                 
         except httpx.TimeoutException:
-            logger.error("❌ Non-voting API request timed out")
+            logger.error(f"❌ Non-voting API request timed out")
+            logger.error(f"   This usually means the API is taking too long to respond or is unreachable")
+            return None
+        except httpx.ConnectError as e:
+            logger.error(f"❌ Cannot connect to non-voting API")
+            logger.error(f"   Error: {str(e)}")
+            logger.error(f"   Check if the URL is correct and the service is running")
             return None
         except httpx.RequestError as e:
-            logger.error(f"❌ Non-voting API request failed: {str(e)}")
+            logger.error(f"❌ Non-voting API request failed")
+            logger.error(f"   Error: {str(e)}")
             return None
         except Exception as e:
             logger.error(f"❌ Unexpected error calling non-voting API: {str(e)}")
+            logger.error(f"   Exception type: {type(e).__name__}")
             return None
     
     def deduplicate_slides(self, slides: List) -> List:
@@ -238,9 +255,9 @@ class PalantirService:
             last_checkpoint_time = last_response.created_at if last_response else None
             
             if last_checkpoint_time:
-                logger.info(f"📅 Last checkpoint: {last_checkpoint_time}")
+                logger.info(f"📅 Last checkpoint: {last_checkpoint_time} (Meeting: {meeting_id})")
             else:
-                logger.info(f"📅 First checkpoint for this meeting")
+                logger.info(f"📅 First checkpoint for this meeting (Meeting: {meeting_id})")
             
             # 1. Get NEW transcripts
             query = db.query(SpeakerTranscript)\
@@ -250,7 +267,7 @@ class PalantirService:
                 query = query.filter(SpeakerTranscript.created_at > last_checkpoint_time)
             
             new_transcripts = query.order_by(SpeakerTranscript.start_time).all()
-            logger.info(f"📝 Found {len(new_transcripts)} new transcripts")
+            logger.info(f"📝 Found {len(new_transcripts)} new transcripts (Meeting: {meeting_id})")
             
             # Format transcripts for API
             transcript_text = "\n".join([
@@ -271,7 +288,7 @@ class PalantirService:
                 )
             
             new_screenshots = screenshot_query.order_by(ScreenshareCapture.captured_at).all()
-            logger.info(f"📸 Found {len(new_screenshots)} new screenshots")
+            logger.info(f"📸 Found {len(new_screenshots)} new screenshots (Meeting: {meeting_id})")
             
             # 3. Deduplicate slides
             unique_slides = self.deduplicate_slides(new_screenshots)
@@ -285,15 +302,19 @@ class PalantirService:
             meeting_summary = transcript_text[:5000]  # Limit size
             
             # 5. Call API
+            logger.info(f"📤 Calling non-voting assistant API for meeting {meeting_id} at chunk {chunk_id}")
             api_response = await self.send_non_voting_request(
                 meeting_summary=meeting_summary,
                 recent_transcription=transcript_text,
-                shown_slide=slide_text
+                shown_slide=slide_text,
+                meeting_id=meeting_id
             )
             
             if not api_response:
-                logger.error("❌ Non-voting API call failed")
+                logger.error(f"❌ Non-voting API call failed for meeting {meeting_id} at chunk {chunk_id}")
                 return
+            
+            logger.info(f"✅ Non-voting API response received for meeting {meeting_id}")
             
             # 6. Store in database
             response_value = api_response.get('value', {})
@@ -313,7 +334,8 @@ class PalantirService:
             
             db.add(db_record)
             db.commit()
-            logger.info(f"💾 Stored non-voting response in database")
+            logger.info(f"💾 Stored non-voting response in database for meeting {meeting_id}")
+            logger.info(f"   Questions: {len(response_value.get('suggested_questions', []))}, Quotes: {len(response_value.get('quotes', []))}, Engagement Points: {len(response_value.get('engagement_points', []))}, Opinions: {len(response_value.get('non_voting_opinions', []))}")
             
             # 7. Broadcast via WebSocket with screenshot URLs
             from app.api.websocket import manager
@@ -347,12 +369,13 @@ class PalantirService:
             }
             
             manager.broadcast_non_voting_assistant_sync(str(meeting_id), broadcast_data)
-            logger.info(f"📡 Broadcast non-voting response via WebSocket")
+            logger.info(f"📡 Broadcasted non-voting response via WebSocket for meeting {meeting_id}")
+            logger.info(f"   Sent {len(new_transcripts)} transcripts and {len(unique_slides)} unique slides to subscribers (Meeting: {meeting_id})")
             
-            logger.info(f"✅ Non-voting checkpoint completed - Chunk {chunk_id}")
+            logger.info(f"✅ Non-voting checkpoint completed successfully for meeting {meeting_id} at chunk {chunk_id}")
             
         except Exception as e:
-            logger.error(f"❌ Non-voting checkpoint failed: {str(e)}")
+            logger.error(f"❌ Non-voting checkpoint failed for meeting {meeting_id} at chunk {chunk_id}: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
 

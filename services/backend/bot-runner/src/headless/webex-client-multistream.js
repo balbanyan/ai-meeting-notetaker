@@ -21,6 +21,7 @@ class MultistreamWebexClient {
     this.webexMeetingId = null;  // Webex's meeting ID
     this.hostEmail = null;
     this.isInMeeting = false;
+    this.cleanupInProgress = false;  // Guard flag to prevent duplicate cleanup calls
     
     // Use shared components
     this.backendClient = new BackendClient();
@@ -44,10 +45,11 @@ class MultistreamWebexClient {
 
   async joinMeeting(meetingUrl, meetingUuid, hostEmail = null) {
     try {
-      this.logger('🚀 Starting headless multistream meeting join...', 'info');
       this.meetingUrl = meetingUrl;
       this.meetingUuid = meetingUuid;  // Passed from embedded app via backend
       this.hostEmail = hostEmail;  // Passed from embedded app
+      
+      this.logger(`🚀 Starting headless multistream meeting join (Meeting UUID: ${this.meetingUuid})...`, 'info');
       
       // Test backend connection
       await this.testBackendConnection();
@@ -67,7 +69,7 @@ class MultistreamWebexClient {
       // Set up speaker event processing
       await this.setupSpeakerEventProcessing();
 
-      this.logger('🎉 Multistream meeting joined successfully with headless client!', 'success');
+      this.logger(`🎉 Multistream meeting joined successfully with headless client (Meeting UUID: ${this.meetingUuid})!`, 'success');
       this.isInMeeting = true;
 
       return {
@@ -79,7 +81,22 @@ class MultistreamWebexClient {
       };
 
     } catch (error) {
-      this.logger(`❌ Failed to join multistream meeting: ${error.message}`, 'error');
+      this.logger(`❌ Failed to join multistream meeting (Meeting UUID: ${this.meetingUuid}): ${error.message}`, 'error');
+      
+      // Update meeting status to inactive in backend
+      if (this.meetingUuid) {
+        try {
+          this.logger(`🔄 Updating meeting status to inactive due to join failure (Meeting UUID: ${this.meetingUuid})...`, 'info');
+          await this.backendClient.updateMeetingStatus(this.meetingUuid, {
+            is_active: false,
+            actual_leave_time: new Date().toISOString()
+          });
+          this.logger(`✅ Meeting marked as inactive (Meeting UUID: ${this.meetingUuid})`, 'success');
+        } catch (statusError) {
+          this.logger(`⚠️ Failed to update meeting status: ${statusError.message}`, 'warn');
+        }
+      }
+      
       return {
         success: false,
         error: error.message
@@ -88,7 +105,7 @@ class MultistreamWebexClient {
   }
 
   async setupBrowserEnvironment() {
-    this.logger('🔧 Setting up browser environment for multistream...', 'info');
+    this.logger(`🔧 Setting up browser environment for multistream (Meeting UUID: ${this.meetingUuid})...`, 'info');
     
     const htmlContent = `
       <!DOCTYPE html>
@@ -103,6 +120,7 @@ class MultistreamWebexClient {
           console.log('📄 Multistream browser environment ready');
           window.audioChunkReady = null;
           window.webexAudioStream = null;
+          window.cleanupInProgress = false;  // Guard flag to prevent duplicate cleanup
           
           // Speaker event processing variables
           window.speakerEvents = [];
@@ -131,7 +149,7 @@ class MultistreamWebexClient {
     await this.page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
     
     // Load Webex SDK
-    this.logger('⏳ Loading Webex SDK for multistream...', 'info');
+    this.logger(`⏳ Loading Webex SDK for multistream (Meeting UUID: ${this.meetingUuid})...`, 'info');
     await this.page.addScriptTag({ 
       url: 'https://unpkg.com/webex@3.8.1/umd/webex.min.js',
       timeout: 15000 
@@ -143,32 +161,32 @@ class MultistreamWebexClient {
     // Expose Node.js cleanup function to browser for direct event-driven cleanup
     await this.page.exposeFunction('triggerNodeCleanup', async (reason, timestamp) => {
       this.logger(`========================================`, 'warn');
-      this.logger(`🔴 CLEANUP CALLED FROM BROWSER`, 'warn');
+      this.logger(`🔴 CLEANUP CALLED FROM BROWSER (Meeting UUID: ${this.meetingUuid})`, 'warn');
       this.logger(`Reason: ${reason}`, 'warn');
       this.logger(`Timestamp: ${timestamp}`, 'warn');
       this.logger(`========================================`, 'warn');
       await this.cleanup();
     });
-    this.logger('✅ Node.js cleanup function exposed to browser', 'success');
+    this.logger(`✅ Node.js cleanup function exposed to browser (Meeting UUID: ${this.meetingUuid})`, 'success');
     
     // Grant microphone permissions
     await this.grantMicrophonePermissions();
     
-    this.logger('✅ Multistream browser environment set up', 'success');
+    this.logger(`✅ Multistream browser environment set up (Meeting UUID: ${this.meetingUuid})`, 'success');
   }
 
   async grantMicrophonePermissions() {
     const context = this.page.browser().defaultBrowserContext();
     try {
       await context.overridePermissions('https://binaries.webex.com', ['microphone', 'camera']);
-      this.logger('🎤 Microphone permissions granted for Webex domains', 'info');
+      this.logger(`🎤 Microphone permissions granted for Webex domains (Meeting UUID: ${this.meetingUuid})`, 'info');
     } catch (error) {
       this.logger('⚠️ Permission grant failed (will rely on browser flags): ' + error.message, 'warn');
     }
   }
 
   async initializeMultistreamWebexAndJoin(meetingUrl) {
-    this.logger('🔧 Initializing Webex SDK with multistream in browser...', 'info');
+    this.logger(`🔧 Initializing Webex SDK with multistream in browser (Meeting UUID: ${this.meetingUuid})...`, 'info');
     
     // Forward console logs from browser (selective filtering)
       this.page.on('console', msg => {
@@ -195,14 +213,14 @@ class MultistreamWebexClient {
         }
       });
     
-    const result = await this.page.evaluate(async (meetingUrl, config) => {
+    const result = await this.page.evaluate(async (meetingUrl, config, meetingUuid) => {
       try {
         // Timing tracker
         const timings = {
           sdkInitStart: Date.now()
         };
         
-        console.log('🔧 Starting Webex SDK initialization...');
+        console.log(`🔧 Starting Webex SDK initialization (Meeting UUID: ${meetingUuid})...`);
         
         // Wait for Webex to be available
         while (typeof window.Webex === 'undefined') {
@@ -223,7 +241,7 @@ class MultistreamWebexClient {
           }
         });
           timings.sdkInitEnd = Date.now();
-          console.log(`✅ SDK initialized (${timings.sdkInitEnd - timings.sdkInitStart}ms)`);
+          console.log(`✅ SDK initialized (${timings.sdkInitEnd - timings.sdkInitStart}ms) - Meeting UUID: ${meetingUuid}`);
         } catch (err) {
           timings.sdkInitEnd = Date.now();
           console.error(`❌ SDK initialization failed after ${timings.sdkInitEnd - timings.sdkInitStart}ms: ${err.message}`);
@@ -235,13 +253,13 @@ class MultistreamWebexClient {
         timings.registerStart = Date.now();
         try {
             const botInfo = await webex.people.get('me');
-            console.log(`✅ Bot authenticated: ${botInfo.displayName}`);
+            console.log(`✅ Bot authenticated: ${botInfo.displayName} - Meeting UUID: ${meetingUuid}`);
             
             // Register with Webex Cloud
             console.log('📱 Registering with Webex Cloud...');
             await webex.meetings.register();
             timings.registerEnd = Date.now();
-            console.log(`✅ Registration complete (${timings.registerEnd - timings.registerStart}ms)`);
+            console.log(`✅ Registration complete (${timings.registerEnd - timings.registerStart}ms) - Meeting UUID: ${meetingUuid}`);
         } catch (err) {
             timings.registerEnd = Date.now();
             console.error(`❌ Registration failed after ${timings.registerEnd - timings.registerStart}ms: ${err.message}`);
@@ -255,7 +273,7 @@ class MultistreamWebexClient {
         try {
           meeting = await webex.meetings.create(meetingUrl);
           timings.meetingCreateEnd = Date.now();
-          console.log(`✅ Meeting created (${timings.meetingCreateEnd - timings.meetingCreateStart}ms)`);
+          console.log(`✅ Meeting created (${timings.meetingCreateEnd - timings.meetingCreateStart}ms) - Meeting UUID: ${meetingUuid}`);
         } catch (err) {
           timings.meetingCreateEnd = Date.now();
           console.error(`❌ Meeting creation failed after ${timings.meetingCreateEnd - timings.meetingCreateStart}ms: ${err.message}`);
@@ -300,7 +318,7 @@ class MultistreamWebexClient {
 
               // Assign stream for SDK compliance and playback
               remoteAudioElement.srcObject = firstMedia.stream;
-              console.log('✅ Audio stream attached to element');
+              console.log(`✅ Audio stream attached to element - Meeting UUID: ${meetingUuid}`);
               
               remoteAudioElement.onloadedmetadata = async () => {
                 console.log('🎵 Multistream audio element loaded, starting MediaRecorder capture...');
@@ -338,7 +356,7 @@ class MultistreamWebexClient {
                         const arrayBuffer = await completeWebM.arrayBuffer();
                         const uint8Array = new Uint8Array(arrayBuffer);
                         
-                        console.log(`✅ Complete WebM created: ${completeWebM.size} bytes from ${webmChunks.length} fragments`);
+                        console.log(`✅ Complete WebM created: ${completeWebM.size} bytes from ${webmChunks.length} fragments - Meeting UUID: ${meetingUuid}`);
                         
                         // Store complete WebM for Node.js processing
                         window.audioChunkReady = {
@@ -397,7 +415,7 @@ class MultistreamWebexClient {
                   // Store references for cleanup
                   window.mediaRecorder = mediaRecorder;
                   
-                  console.log(`✅ MediaRecorder started - capturing ${chunkDurationMs/1000}s chunks`);
+                  console.log(`✅ MediaRecorder started - capturing ${chunkDurationMs/1000}s chunks - Meeting UUID: ${meetingUuid}`);
                   
                 } catch (error) {
                   console.error('❌ Failed to set up MediaRecorder:', error);
@@ -451,11 +469,11 @@ class MultistreamWebexClient {
               videoEl.style.display = 'none';
               document.body.appendChild(videoEl);
               window.screenShareVideoElement = videoEl;
-              console.log('✅ Created hidden screenshare video element');
+              console.log(`✅ Created hidden screenshare video element - Meeting UUID: ${meetingUuid}`);
             }
             
             window.screenShareVideoElement.srcObject = screenShareVideo.stream;
-            console.log('✅ Screenshare stream attached to video element');
+            console.log(`✅ Screenshare stream attached to video element - Meeting UUID: ${meetingUuid}`);
           }
         });
 
@@ -464,6 +482,13 @@ class MultistreamWebexClient {
           console.log(`🔇 Meeting media stopped: ${media.type}`);
           
           if (media.type === 'remoteAudio') {
+            // Check if cleanup is already in progress (prevent duplicate cleanup calls)
+            if (window.cleanupInProgress) {
+              console.log('⚠️ Cleanup already in progress, skipping duplicate remoteAudio-stopped event');
+              return;
+            }
+            window.cleanupInProgress = true;
+            
             const timestamp = new Date().toISOString();
             console.log('========================================');
             console.log('🔴 CLEANUP TRIGGER: remoteAudio stopped');
@@ -506,14 +531,14 @@ class MultistreamWebexClient {
 
 
         // Join meeting with multistream enabled
-        console.log('🚪 Joining meeting...');
+        console.log(`🚪 Joining meeting (Meeting UUID: ${meetingUuid})...`);
         timings.joinStart = Date.now();
         try {
         await meeting.join({
           enableMultistream: true  // Enable multistream
         });
           timings.joinEnd = Date.now();
-          console.log(`✅ Joined meeting (${timings.joinEnd - timings.joinStart}ms)`);
+          console.log(`✅ Joined meeting (${timings.joinEnd - timings.joinStart}ms) - Meeting UUID: ${meetingUuid}`);
         } catch (err) {
           timings.joinEnd = Date.now();
           console.error(`❌ Join failed after ${timings.joinEnd - timings.joinStart}ms: ${err.message}`);
@@ -521,7 +546,7 @@ class MultistreamWebexClient {
         }
 
         // Add media with multistream configuration
-        console.log('🎧 Starting addMedia()...');
+        console.log(`🎧 Starting addMedia (Meeting UUID: ${meetingUuid})...`);
         timings.addMediaStart = Date.now();
         try {
         await meeting.addMedia({
@@ -550,7 +575,7 @@ class MultistreamWebexClient {
         });
           timings.addMediaEnd = Date.now();
           const durationSeconds = Math.round((timings.addMediaEnd - timings.addMediaStart)/1000);
-          console.log(`✅ Media connected (${durationSeconds}s)`);
+          console.log(`✅ Media connected (${durationSeconds}s) - Meeting UUID: ${meetingUuid}`);
         } catch (addMediaError) {
           timings.addMediaEnd = Date.now();
           const durationSeconds = Math.round((timings.addMediaEnd - timings.addMediaStart)/1000);
@@ -638,12 +663,12 @@ class MultistreamWebexClient {
                       const octet3 = parseInt(parts[1].substring(0, 2), 16);
                       const octet4 = parseInt(parts[1].substring(2, 4), 16);
                       const ipv4 = `${octet1}.${octet2}.${octet3}.${octet4}`;
-                      console.log(`🌐 Connection: ${connectionType} → ${ipv4} (NAT64: ${ipv6})`);
+                      console.log(`🌐 Connection: ${connectionType} → ${ipv4} (NAT64: ${ipv6}) - Meeting UUID: ${meetingUuid}`);
                     } else {
-                      console.log(`🌐 Connection: ${connectionType} → ${ip}`);
+                      console.log(`🌐 Connection: ${connectionType} → ${ip} - Meeting UUID: ${meetingUuid}`);
                     }
                   } else {
-                    console.log(`🌐 Connection: ${connectionType} → ${ip}`);
+                    console.log(`🌐 Connection: ${connectionType} → ${ip} - Meeting UUID: ${meetingUuid}`);
                   }
                 }
               }
@@ -662,13 +687,13 @@ class MultistreamWebexClient {
         console.error('❌ Browser multistream initialization failed:', error);
         return { success: false, error: error.message };
       }
-    }, meetingUrl, config);
+    }, meetingUrl, config, this.meetingUuid);
 
     if (!result.success) {
       throw new Error(`Browser multistream initialization failed: ${result.error}`);
     }
 
-    this.logger('✅ Webex multistream initialized and meeting joined in browser', 'success');
+    this.logger(`✅ Webex multistream initialized and meeting joined in browser (Meeting UUID: ${this.meetingUuid})`, 'success');
     return result;
   }
 
@@ -677,7 +702,7 @@ class MultistreamWebexClient {
   // ============================================================================
 
   async setupSpeakerEventProcessing() {
-    this.logger('🗣️ Setting up speaker event processing...', 'info');
+    this.logger(`🗣️ Setting up speaker event processing (Meeting UUID: ${this.meetingUuid})...`, 'info');
     
     // Inject speaker debouncing logic into browser
     await this.page.evaluate(() => {
@@ -734,7 +759,7 @@ class MultistreamWebexClient {
       
       // Process confirmed speaker event
       window.processSpeakerEvent = function(speakerId, startTime) {
-        console.log(`✅ Speaker confirmed`);
+        console.log(`✅ Speaker confirmed (Meeting UUID: ${window.meetingId})`);
         
         try {
           // Get member name if available
@@ -759,7 +784,7 @@ class MultistreamWebexClient {
           };
           
           window.speakerEvents.push(speakerEvent);
-          console.log(`✅ Speaker event queued`);
+          console.log(`✅ Speaker event queued (Meeting UUID: ${window.meetingId})`);
           
         } catch (error) {
           console.error(`❌ Failed to process speaker event: ${error.message}`);
@@ -794,7 +819,7 @@ class MultistreamWebexClient {
         for (const event of events) {
           try {
             await this.backendClient.sendSpeakerEvent(event);
-            this.logger(`✅ Speaker event sent: ${event.member_name || event.member_id}`, 'success');
+            this.logger(`✅ Speaker event sent: ${event.member_name || event.member_id} (Meeting UUID: ${this.meetingUuid})`, 'success');
           } catch (error) {
             this.logger(`❌ Failed to send speaker event: ${error.message}`, 'error');
           }
@@ -804,7 +829,7 @@ class MultistreamWebexClient {
       }
     }, 1000); // Check every second
 
-    this.logger('✅ Speaker event processing started', 'success');
+    this.logger(`✅ Speaker event processing started (Meeting UUID: ${this.meetingUuid})`, 'success');
   }
 
   // ============================================================================
@@ -812,16 +837,16 @@ class MultistreamWebexClient {
   // ============================================================================
 
   async initializeAudioProcessor() {
-    this.logger('🔧 Initializing AudioProcessor with meeting UUID...', 'info');
+    this.logger(`🔧 Initializing AudioProcessor (Meeting UUID: ${this.meetingUuid})...`, 'info');
     
     this.audioProcessor = new AudioProcessor(this.meetingUuid, this.hostEmail, this.backendClient);
     await this.audioProcessor.initializeChunkCount();
     
-    this.logger(`✅ AudioProcessor initialized - Starting from chunk #${this.audioProcessor.chunkCount + 1}`, 'success');
+    this.logger(`✅ AudioProcessor initialized - Starting from chunk #${this.audioProcessor.chunkCount + 1} (Meeting UUID: ${this.meetingUuid})`, 'success');
   }
 
   async setupAudioProcessing() {
-    this.logger('🎵 Setting up audio processing loop...', 'info');
+    this.logger(`🎵 Setting up audio processing loop (Meeting UUID: ${this.meetingUuid})...`, 'info');
 
     const audioInterval = setInterval(async () => {
       if (!this.isInMeeting) {
@@ -848,14 +873,14 @@ class MultistreamWebexClient {
     }, 500);
 
     this.audioInterval = audioInterval;
-    this.logger('✅ Audio processing loop started', 'success');
+    this.logger(`✅ Audio processing loop started (Meeting UUID: ${this.meetingUuid})`, 'success');
   }
 
   async processMediaRecorderChunk(audioChunk) {
     this.audioProcessor.chunkCount++;
     const chunkId = this.audioProcessor.chunkCount;
     
-    this.logger(`🔄 Processing MediaRecorder chunk #${chunkId}`, 'info');
+    this.logger(`🔄 Processing MediaRecorder chunk #${chunkId} (Meeting UUID: ${this.meetingUuid})`, 'info');
     
     // Calculate timing data for the chunk
     const chunkEndTime = new Date();
@@ -866,7 +891,7 @@ class MultistreamWebexClient {
     if (config.screenshots.enabled) {
       screenshotBuffer = await this.captureScreenshot();
       if (screenshotBuffer) {
-        this.logger(`📸 Screenshot captured for chunk #${chunkId}`, 'success');
+        this.logger(`📸 Screenshot captured for chunk #${chunkId} (Meeting UUID: ${this.meetingUuid})`, 'success');
       }
     }
     
@@ -882,7 +907,7 @@ class MultistreamWebexClient {
         chunkStartTime.toISOString(), // audio_started_at
         chunkEndTime.toISOString()    // audio_ended_at
       );
-      this.logger(`✅ WAV chunk sent successfully with timing data`, 'success');
+      this.logger(`✅ WAV chunk sent successfully with timing data (Meeting UUID: ${this.meetingUuid})`, 'success');
       
       // Send screenshot if captured
       if (screenshotBuffer) {
@@ -894,7 +919,7 @@ class MultistreamWebexClient {
             screenshotBuffer,
             chunkStartTime.toISOString()
           );
-          this.logger(`✅ Screenshot sent successfully for chunk #${chunkId}`, 'success');
+          this.logger(`✅ Screenshot sent successfully for chunk #${chunkId} (Meeting UUID: ${this.meetingUuid})`, 'success');
         } catch (error) {
           this.logger(`⚠️ Failed to send screenshot: ${error.message}`, 'warn');
         }
@@ -980,7 +1005,14 @@ class MultistreamWebexClient {
   // ============================================================================
 
   async cleanup() {
-    this.logger('🧹 Starting comprehensive multistream cleanup...', 'info');
+    // Guard against duplicate cleanup calls
+    if (this.cleanupInProgress) {
+      this.logger(`⚠️ Cleanup already in progress, skipping duplicate call (Meeting UUID: ${this.meetingUuid})`, 'warn');
+      return;
+    }
+    this.cleanupInProgress = true;
+    
+    this.logger(`🧹 Starting comprehensive multistream cleanup (Meeting UUID: ${this.meetingUuid})...`, 'info');
     
     // 1. Set meeting state to false
     this.isInMeeting = false;
@@ -1003,7 +1035,7 @@ class MultistreamWebexClient {
           is_active: false,
           actual_leave_time: new Date().toISOString()
         });
-        this.logger('✅ Meeting status updated to inactive', 'success');
+        this.logger(`✅ Meeting status updated to inactive (Meeting UUID: ${this.meetingUuid})`, 'success');
       }
     } catch (error) {
       this.logger(`⚠️ Error updating meeting status: ${error.message}`, 'warn');
@@ -1013,6 +1045,9 @@ class MultistreamWebexClient {
     try {
       if (this.page && !this.page.isClosed()) {
         await this.page.evaluate(() => {
+          // Set cleanup flag in browser context as well
+          window.cleanupInProgress = true;
+          
           // Leave Webex meeting gracefully
           if (window.currentMeeting) {
             try {
@@ -1055,7 +1090,7 @@ class MultistreamWebexClient {
             window.silenceTimer = null;
           }
           
-          console.log('✅ Browser-side cleanup completed');
+          console.log(`✅ Browser-side cleanup completed - Meeting UUID: ${window.meetingId}`);
         });
       }
     } catch (error) {
@@ -1066,20 +1101,21 @@ class MultistreamWebexClient {
     try {
       if (this.page && !this.page.isClosed()) {
         await this.page.close();
-        this.logger('✅ Browser page closed', 'success');
+        this.logger(`✅ Browser page closed (Meeting UUID: ${this.meetingUuid})`, 'success');
       }
     } catch (error) {
       this.logger(`⚠️ Error closing page: ${error.message}`, 'warn');
     }
     
-    // 5. Reset instance variables
+    // 5. Log completion before resetting variables
+    this.logger(`✅ Comprehensive multistream cleanup completed (Meeting UUID: ${this.meetingUuid})`, 'success');
+    
+    // 6. Reset instance variables
     this.meetingUrl = null;
     this.meetingUuid = null;
     this.webexMeetingId = null;
     this.hostEmail = null;
     this.audioProcessor = null;
-    
-    this.logger('✅ Comprehensive multistream cleanup completed', 'success');
   }
 
   getStatus() {

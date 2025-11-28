@@ -1,8 +1,12 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from typing import Dict, Set
+from sqlalchemy.orm import Session
 import json
 import logging
 import asyncio
+
+from app.core.database import get_db
+from app.models.meeting import Meeting
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +215,93 @@ async def websocket_meeting_endpoint(websocket: WebSocket, meeting_id: str):
         logger.error(f"WebSocket error for meeting {meeting_id}: {str(e)}")
     finally:
         manager.disconnect(websocket, meeting_id)
+
+
+@router.websocket("/ws/meeting-by-link")
+async def websocket_meeting_by_link_endpoint(websocket: WebSocket, link: str = Query(...)):
+    """
+    WebSocket endpoint that accepts a meeting URL and automatically finds the latest meeting UUID.
+    
+    Since meeting URLs can have multiple instances (recurring meetings), this endpoint
+    retrieves the most recent meeting for the provided URL.
+    
+    URL: ws://localhost:8080/ws/meeting-by-link?link={meeting_url}
+    """
+    # Accept the connection first to send error messages if needed
+    await websocket.accept()
+    
+    try:
+        # Get database session - we need to do this manually since Depends doesn't work in WebSocket
+        from app.core.database import SessionLocal
+        db = SessionLocal()
+        
+        try:
+            # Find the most recent meeting with this URL
+            meeting = db.query(Meeting).filter(
+                Meeting.meeting_link == link
+            ).order_by(Meeting.created_at.desc()).first()
+            
+            if not meeting:
+                await websocket.send_json({
+                    "type": "error",
+                    "data": {
+                        "message": "No meeting found with the provided link"
+                    }
+                })
+                await websocket.close()
+                return
+            
+            meeting_id = str(meeting.id)
+            logger.info(f"🔗 WebSocket connected via link - resolved to meeting UUID")
+            
+        finally:
+            db.close()
+        
+        # Register this connection to the meeting room
+        if meeting_id not in manager.active_connections:
+            manager.active_connections[meeting_id] = set()
+        manager.active_connections[meeting_id].add(websocket)
+        logger.info(f"🔌 WebSocket connected to meeting via link (total: {len(manager.active_connections[meeting_id])})")
+        
+        # Send initial connection confirmation with the resolved meeting_id
+        await websocket.send_json({
+            "type": "connected",
+            "data": {
+                "meeting_id": meeting_id,
+                "message": "Connected to meeting updates (resolved from link)"
+            }
+        })
+        
+        # Keep connection alive and handle incoming messages
+        while True:
+            try:
+                data = await websocket.receive_text()
+                
+                # Handle ping/pong for keepalive
+                if data == "ping":
+                    await websocket.send_json({"type": "pong"})
+                    
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket disconnected gracefully for meeting (via link)")
+                break
+            except Exception as e:
+                logger.error(f"Error in WebSocket loop for meeting (via link): {str(e)}")
+                break
+                
+    except Exception as e:
+        logger.error(f"WebSocket error for meeting by link: {str(e)}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "data": {
+                    "message": f"Connection error: {str(e)}"
+                }
+            })
+        except:
+            pass
+    finally:
+        if 'meeting_id' in locals():
+            manager.disconnect(websocket, meeting_id)
 
 
 @router.get("/ws/stats")
