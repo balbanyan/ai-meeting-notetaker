@@ -4,10 +4,10 @@
  * Based on webex-client.js but with multistream events and speaker change detection
  */
 
-const { BackendClient } = require('../shared/api/http-client');
-const { AudioProcessor } = require('../shared/audio/processor');
-const { config } = require('../shared/config');
-const { createLogger, testBackend } = require('../shared/utils');
+const { BackendClient } = require('../lib/api/http-client');
+const { AudioProcessor } = require('../lib/audio/processor');
+const { config } = require('../lib/config');
+const { createLogger, testBackend } = require('../lib/utils');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs').promises;
 const path = require('path');
@@ -535,7 +535,7 @@ class MultistreamWebexClient {
         timings.joinStart = Date.now();
         try {
         await meeting.join({
-          enableMultistream: true  // Enable multistream
+          enableMultistream: true
         });
           timings.joinEnd = Date.now();
           console.log(`✅ Joined meeting (${timings.joinEnd - timings.joinStart}ms) - Meeting UUID: ${meetingUuid}`);
@@ -1035,7 +1035,6 @@ class MultistreamWebexClient {
           is_active: false,
           actual_leave_time: new Date().toISOString()
         });
-        this.logger(`✅ Meeting status updated to inactive (Meeting UUID: ${this.meetingUuid})`, 'success');
       }
     } catch (error) {
       this.logger(`⚠️ Error updating meeting status: ${error.message}`, 'warn');

@@ -54,7 +54,6 @@ async def wait_for_bot_runner_ready(max_wait_seconds: int = 20) -> bool:
 
 class RegisterAndJoinRequest(BaseModel):
     meeting_id: str  # Webex meeting ID from SDK
-    enable_multistream: Optional[bool] = None  # Optional: True for multistream, False for legacy, None for default
 
 
 class RegisterAndJoinWithLinkRequest(BaseModel):
@@ -110,7 +109,6 @@ async def register_and_join_meeting(
             )
         
         # Step 2: Now fetch complete meeting data from Webex (only if bot not already active)
-        print(f"🌐 Fetching complete meeting data from Webex APIs...")
         from app.services.webex_api import WebexMeetingsAPI
         webex_api = WebexMeetingsAPI(
             client_id=settings.webex_client_id,
@@ -246,10 +244,6 @@ async def register_and_join_meeting(
                     "hostEmail": host_email  # Pass host email from API
                 }
                 
-                # Add enableMultistream if specified
-                if request.enable_multistream is not None:
-                    payload["enableMultistream"] = request.enable_multistream
-                
                 bot_response = await client.post(
                     bot_runner_url,
                     json=payload,
@@ -332,7 +326,6 @@ async def register_and_join_meeting_with_link(
         )
         
         # Step 1: Find meeting_id from link first (lightweight check)
-        print(f"🔍 Finding meeting by link...")
         webex_meeting_id = await webex_api.find_meeting_id_by_link(request.meeting_link)
         
         if not webex_meeting_id:
@@ -340,8 +333,6 @@ async def register_and_join_meeting_with_link(
                 status_code=404,
                 detail="No meeting found with the provided link"
             )
-        
-        print(f"✅ Found meeting")
         
         # Step 2: Check if bot is already active BEFORE making expensive API calls
         existing_meeting = db.query(Meeting).filter(
@@ -357,7 +348,6 @@ async def register_and_join_meeting_with_link(
             )
         
         # Step 3: Now fetch complete meeting data (only if bot not already active)
-        print(f"📋 Fetching complete meeting data from Webex")
         meeting_data = await webex_api.get_complete_meeting_data(webex_meeting_id)
         
         # Extract data from API response (same as register_and_join_meeting)
@@ -520,7 +510,6 @@ async def register_and_join_meeting_with_link(
 
 class TestJoinRequest(BaseModel):
     meeting_url: str
-    enable_multistream: Optional[bool] = None  # Optional: True for multistream, False for legacy, None for default
 
 
 class TestJoinResponse(BaseModel):
@@ -633,10 +622,6 @@ async def test_join_meeting(
                     "meetingUuid": meeting_uuid,  # Pass UUID so chunks/speakers work
                     "hostEmail": "test@example.com"
                 }
-                
-                # Add enableMultistream if specified
-                if request.enable_multistream is not None:
-                    payload["enableMultistream"] = request.enable_multistream
                 
                 bot_response = await client.post(
                     bot_runner_url,

@@ -70,9 +70,8 @@ WORKDIR /app
 COPY app ./app
 COPY main.py .
 
-# Set environment variables for bot-runner headless mode
-ENV BOT_MODE=headless \
-    NODE_ENV=production \
+# Set environment variables for bot-runner
+ENV NODE_ENV=production \
     PYTHONUNBUFFERED=1
 
 # Expose port 8080 (GCP Cloud Run requirement)

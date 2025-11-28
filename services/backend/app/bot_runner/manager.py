@@ -90,11 +90,11 @@ class BotRunnerManager:
                     f"Run 'npm install' in the bot-runner directory."
                 )
             
-            # Start Node.js process in headless mode
-            # Use node directly to run src/index.js with --headless flag
+            # Start Node.js process
+            # Use node directly to run src/index.js
             # Don't capture stdout/stderr - let them print directly to parent console for GCP logging
             self.process = subprocess.Popen(
-                ["node", "src/index.js", "--headless"],
+                ["node", "src/index.js"],
                 cwd=str(self.bot_runner_dir),
                 env={**os.environ}  # Inherit environment variables
             )

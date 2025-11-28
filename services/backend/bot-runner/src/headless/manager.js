@@ -1,6 +1,5 @@
 const puppeteer = require('puppeteer');
-const { config, validateConfig } = require('../shared/config');
-const { PuppeteerWebexClient } = require('./webex-client');
+const { config, validateConfig } = require('../lib/config');
 const { MultistreamWebexClient } = require('./webex-client-multistream');
 
 /**
@@ -12,10 +11,6 @@ class HeadlessRunner {
     this.browser = null;
     this.activeMeetings = new Map();
     this.isRunning = false;
-    
-    // Multistream configuration (default: true)
-    this.enableMultistream = process.env.ENABLE_MULTISTREAM !== 'false';
-    console.log(`🎛️ Multistream mode: ${this.enableMultistream ? 'ENABLED' : 'DISABLED'}`);
   }
 
   /**
@@ -88,16 +83,15 @@ class HeadlessRunner {
       res.json({ 
         status: 'ok', 
         mode: 'headless',
-        multistreamEnabled: this.enableMultistream,
         activeMeetings: this.activeMeetings.size,
         browserConnected: !!this.browser && this.browser.isConnected()
       });
     });
     
-    // Join meeting endpoint - supports both legacy and multistream
+    // Join meeting endpoint
     app.post('/join', async (req, res) => {
       try {
-        const { meetingUrl, meetingUuid, hostEmail, enableMultistream } = req.body;
+        const { meetingUrl, meetingUuid, hostEmail } = req.body;
         
         if (!meetingUrl) {
           return res.status(400).json({ 
@@ -106,12 +100,8 @@ class HeadlessRunner {
           });
         }
         
-        // Determine which client to use
-        const useMultistream = enableMultistream !== undefined ? enableMultistream : this.enableMultistream;
-        const clientType = useMultistream ? 'multistream' : 'legacy';
-        
         const uuidInfo = meetingUuid ? ` (Meeting UUID: ${meetingUuid})` : '';
-        console.log(`📞 Join meeting request received (${clientType} mode)${uuidInfo}`);
+        console.log(`📞 Join meeting request received${uuidInfo}`);
         if (meetingUuid) {
           console.log(`📋 Embedded app workflow - Meeting UUID: ${meetingUuid}`);
         }
@@ -133,26 +123,15 @@ class HeadlessRunner {
           console.log('⚠️ Permission grant failed (will rely on browser flags):', permError.message);
         }
         
-        // Create appropriate Webex client for this page
-        const webexClient = useMultistream ? 
-          new MultistreamWebexClient(page) : 
-          new PuppeteerWebexClient(page);
-          
-        console.log(`🎯 Using ${clientType} Webex client`);
+        // Create Webex client for this page
+        const webexClient = new MultistreamWebexClient(page);
         
         // Generate temporary meeting ID for tracking
         const tempMeetingId = meetingUuid || `meeting_${Date.now()}`;
         
         // Join the meeting and wait for result before responding
-        // If meetingUuid provided (embedded app workflow), pass it to multistream client
         try {
-          let result;
-          if (useMultistream && meetingUuid) {
-            result = await webexClient.joinMeeting(meetingUrl, meetingUuid, hostEmail);
-          } else {
-            // Legacy flow - client will fetch and register itself
-            result = await webexClient.joinMeeting(meetingUrl);
-          }
+          const result = await webexClient.joinMeeting(meetingUrl, meetingUuid, hostEmail);
           
           // Check if join was actually successful
           if (result && result.success !== false) {
@@ -162,7 +141,6 @@ class HeadlessRunner {
               page, 
               webexClient, 
               meetingUrl,
-              clientType,
               startTime: new Date().toISOString()
             });
             
@@ -172,8 +150,7 @@ class HeadlessRunner {
             res.json({ 
               success: true, 
               meetingId: meetingId,
-              clientType,
-              message: `Meeting joined successfully with ${clientType} client`
+              message: 'Meeting joined successfully'
             });
           } else {
             // Join failed - error already logged by client
@@ -269,14 +246,13 @@ class HeadlessRunner {
       const { meetingId } = req.params;
       
       if (this.activeMeetings.has(meetingId)) {
-        const { webexClient, meetingUrl, clientType, startTime } = this.activeMeetings.get(meetingId);
+        const { webexClient, meetingUrl, startTime } = this.activeMeetings.get(meetingId);
         const status = webexClient.getStatus();
         
         res.json({
           success: true,
           meetingId,
           meetingUrl,
-          clientType,
           startTime,
           ...status
         });
@@ -293,7 +269,6 @@ class HeadlessRunner {
       const meetings = Array.from(this.activeMeetings.entries()).map(([meetingId, data]) => ({
         meetingId,
         meetingUrl: data.meetingUrl,
-        clientType: data.clientType,
         startTime: data.startTime,
         status: data.webexClient.getStatus()
       }));
@@ -308,10 +283,9 @@ class HeadlessRunner {
     // Start server
     const server = app.listen(3001, () => {
       console.log('🌐 API server started on port 3001');
-      console.log(`🎛️ Multistream: ${this.enableMultistream ? 'ENABLED' : 'DISABLED'} (set ENABLE_MULTISTREAM=false to disable)`);
       console.log('📋 Available endpoints:');
       console.log('   GET  /health');
-      console.log('   POST /join  (body: {meetingUrl, hostEmail?, enableMultistream?})');
+      console.log('   POST /join  (body: {meetingUrl, meetingUuid?, hostEmail?})');
       console.log('   POST /leave');
       console.log('   GET  /meetings');
       console.log('   GET  /meetings/:id/status');

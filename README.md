@@ -369,8 +369,8 @@ ai-meeting-notetaker/
 │       │   └── src/
 │       │       ├── headless/        # Puppeteer bot
 │       │       │   ├── manager.js             # Express server
-│       │       │   └── webex-client-multistream.js # Multistream client
-│       │       └── shared/          # Audio processing, API client
+│       │       │   └── webex-client-multistream.js # Webex client
+│       │       └── lib/               # Audio processing, API client
 │       ├── main.py       # Entry point
 │       └── requirements.txt
 ├── markdown-instructions/ # Documentation
@@ -384,7 +384,7 @@ ai-meeting-notetaker/
 - `services/backend/app/services/webex_api.py` - Webex API client (Admin, List, Invitees)
 - `services/backend/app/bot_runner/manager.py` - On-demand bot-runner subprocess manager
 - `services/backend/bot-runner/src/headless/webex-client-multistream.js` - Multistream audio capture
-- `services/backend/bot-runner/src/shared/audio/processor.js` - Audio processing and chunking
+- `services/backend/bot-runner/src/lib/audio/processor.js` - Audio processing and chunking
 - `services/backend/main.py` - FastAPI entry point with auto-tables
 
 ---
