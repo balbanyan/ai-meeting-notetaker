@@ -95,20 +95,21 @@ async def register_and_join_meeting(
     try:
         print(f"📱 REGISTER AND JOIN - Meeting ID: {request.meeting_id}")
         
-        # Step 1: Check if bot is already active BEFORE making expensive API calls
+        # Check if meeting already exists (removed multiple bot restriction for testing)
         existing_meeting = db.query(Meeting).filter(
             Meeting.webex_meeting_id == request.meeting_id
         ).first()
         
-        if existing_meeting and existing_meeting.is_active:
-            meeting_uuid = str(existing_meeting.id)
-            print(f"⚠️ Bot is already active in this meeting (Meeting UUID: {meeting_uuid})")
-            raise HTTPException(
-                status_code=409,
-                detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
-            )
+        # NOTE: Multiple bot restriction removed for testing
+        # if existing_meeting and existing_meeting.is_active:
+        #     meeting_uuid = str(existing_meeting.id)
+        #     print(f"⚠️ Bot is already active in this meeting (Meeting UUID: {meeting_uuid})")
+        #     raise HTTPException(
+        #         status_code=409,
+        #         detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
+        #     )
         
-        # Step 2: Now fetch complete meeting data from Webex (only if bot not already active)
+        # Fetch complete meeting data from Webex
         from app.services.webex_api import WebexMeetingsAPI
         webex_api = WebexMeetingsAPI(
             client_id=settings.webex_client_id,
@@ -334,20 +335,21 @@ async def register_and_join_meeting_with_link(
                 detail="No meeting found with the provided link"
             )
         
-        # Step 2: Check if bot is already active BEFORE making expensive API calls
+        # Check if meeting already exists (removed multiple bot restriction for testing)
         existing_meeting = db.query(Meeting).filter(
             Meeting.webex_meeting_id == webex_meeting_id
         ).first()
         
-        if existing_meeting and existing_meeting.is_active:
-            meeting_uuid = str(existing_meeting.id)
-            print(f"⚠️ Bot is already active in this meeting (Meeting UUID: {meeting_uuid})")
-            raise HTTPException(
-                status_code=409,
-                detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
-            )
+        # NOTE: Multiple bot restriction removed for testing
+        # if existing_meeting and existing_meeting.is_active:
+        #     meeting_uuid = str(existing_meeting.id)
+        #     print(f"⚠️ Bot is already active in this meeting (Meeting UUID: {meeting_uuid})")
+        #     raise HTTPException(
+        #         status_code=409,
+        #         detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
+        #     )
         
-        # Step 3: Now fetch complete meeting data (only if bot not already active)
+        # Fetch complete meeting data
         meeting_data = await webex_api.get_complete_meeting_data(webex_meeting_id)
         
         # Extract data from API response (same as register_and_join_meeting)
@@ -554,14 +556,14 @@ async def test_join_meeting(
         ).first()
         
         if existing_meeting:
-            # Check if bot is already active in this meeting
-            if existing_meeting.is_active:
-                meeting_uuid = str(existing_meeting.id)
-                print(f"⚠️ Bot is already active in this test meeting (Meeting UUID: {meeting_uuid})")
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
-                )
+            # NOTE: Multiple bot restriction removed for testing
+            # if existing_meeting.is_active:
+            #     meeting_uuid = str(existing_meeting.id)
+            #     print(f"⚠️ Bot is already active in this test meeting (Meeting UUID: {meeting_uuid})")
+            #     raise HTTPException(
+            #         status_code=409,
+            #         detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
+            #     )
             
             print(f"🔄 Test meeting exists - reactivating (UUID: {existing_meeting.id})")
             existing_meeting.is_active = True

@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     non_voting_assistant_url: str = ""
     non_voting_call_frequency: int = 20  # Call every N chunks
     
+    # Redis Settings (for Celery task queue)
+    redis_url: str = "redis://localhost:6379/0"
+    
     class Config:
         env_file = ".env"
         extra = "ignore"  # Ignore bot-runner specific env vars

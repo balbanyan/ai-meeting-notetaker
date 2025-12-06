@@ -226,6 +226,13 @@ class PalantirService:
         """
         Complete workflow: aggregate incremental data, call API, store, broadcast.
         
+        Optimized for high concurrency using 3-phase connection management:
+        Phase 1: Quick DB read (250ms) → copy data → release connection
+        Phase 2: CPU + I/O work (10-60s) WITHOUT holding DB connection
+        Phase 3: Quick DB write (50ms) → release connection
+        
+        Total connection hold time: ~300ms (vs 10-60+ seconds before optimization)
+        
         Steps:
         1. Get NEW transcripts since last call
         2. Get NEW screenshots since last call
@@ -237,71 +244,98 @@ class PalantirService:
         Args:
             meeting_id: UUID of the meeting
             chunk_id: Current chunk number that triggered this checkpoint
-            db: Database session
+            db: Database session (will be closed and reopened to avoid long hold times)
         """
         try:
+            from app.core.database import SessionLocal
             from app.models.non_voting_assistant import NonVotingAssistantResponse
             from app.models.speaker_transcript import SpeakerTranscript
             from app.models.screenshare_capture import ScreenshareCapture
             
             logger.info(f"🎯 Starting non-voting checkpoint for meeting {meeting_id} at chunk {chunk_id}")
             
-            # Get last checkpoint time
-            last_response = db.query(NonVotingAssistantResponse)\
-                .filter(NonVotingAssistantResponse.meeting_id == meeting_id)\
-                .order_by(NonVotingAssistantResponse.created_at.desc())\
-                .first()
+            # Phase 1: Quick DB read, copy data, release connection
+            # Close the passed-in db session (if any) and create a fresh one for quick read
+            if db is not None:
+                db.close()
+            db = SessionLocal()
             
-            last_checkpoint_time = last_response.created_at if last_response else None
+            try:
+                # Get last checkpoint time
+                last_response = db.query(NonVotingAssistantResponse)\
+                    .filter(NonVotingAssistantResponse.meeting_id == meeting_id)\
+                    .order_by(NonVotingAssistantResponse.created_at.desc())\
+                    .first()
+                
+                last_checkpoint_time = last_response.created_at if last_response else None
+                
+                if last_checkpoint_time:
+                    logger.info(f"📅 Last checkpoint: {last_checkpoint_time} (Meeting: {meeting_id})")
+                else:
+                    logger.info(f"📅 First checkpoint for this meeting (Meeting: {meeting_id})")
+                
+                # 1. Get NEW transcripts
+                query = db.query(SpeakerTranscript)\
+                    .filter(SpeakerTranscript.meeting_id == meeting_id)
+                
+                if last_checkpoint_time:
+                    query = query.filter(SpeakerTranscript.created_at > last_checkpoint_time)
+                
+                new_transcripts = query.order_by(SpeakerTranscript.start_time).all()
+                logger.info(f"📝 Found {len(new_transcripts)} new transcripts (Meeting: {meeting_id})")
+                
+                # Copy transcript data (to avoid lazy loading issues after connection closes)
+                transcripts_data = [{
+                    'speaker_name': t.speaker_name,
+                    'transcript_text': t.transcript_text,
+                    'start_time': t.start_time
+                } for t in new_transcripts]
+                
+                # 2. Get NEW screenshots
+                screenshot_query = db.query(ScreenshareCapture)\
+                    .filter(
+                        ScreenshareCapture.meeting_id == meeting_id,
+                        ScreenshareCapture.vision_analysis.isnot(None)
+                    )
+                
+                if last_checkpoint_time:
+                    screenshot_query = screenshot_query.filter(
+                        ScreenshareCapture.created_at > last_checkpoint_time
+                    )
+                
+                new_screenshots = screenshot_query.order_by(ScreenshareCapture.captured_at).all()
+                logger.info(f"📸 Found {len(new_screenshots)} new screenshots (Meeting: {meeting_id})")
+                
+                # Copy screenshot data (to avoid lazy loading issues)
+                screenshots_data = [{
+                    'id': str(s.id),
+                    'vision_analysis': s.vision_analysis,
+                    'captured_at': s.captured_at
+                } for s in new_screenshots]
+                
+            finally:
+                db.close()  # Release after ~250ms
             
-            if last_checkpoint_time:
-                logger.info(f"📅 Last checkpoint: {last_checkpoint_time} (Meeting: {meeting_id})")
-            else:
-                logger.info(f"📅 First checkpoint for this meeting (Meeting: {meeting_id})")
-            
-            # 1. Get NEW transcripts
-            query = db.query(SpeakerTranscript)\
-                .filter(SpeakerTranscript.meeting_id == meeting_id)
-            
-            if last_checkpoint_time:
-                query = query.filter(SpeakerTranscript.created_at > last_checkpoint_time)
-            
-            new_transcripts = query.order_by(SpeakerTranscript.start_time).all()
-            logger.info(f"📝 Found {len(new_transcripts)} new transcripts (Meeting: {meeting_id})")
+            # Phase 2: CPU-intensive work + HTTP I/O WITHOUT holding DB connection
             
             # Format transcripts for API
             transcript_text = "\n".join([
-                f"{t.speaker_name}: {t.transcript_text}"
-                for t in new_transcripts
+                f"{t['speaker_name']}: {t['transcript_text']}"
+                for t in transcripts_data
             ])
             
-            # 2. Get NEW screenshots
-            screenshot_query = db.query(ScreenshareCapture)\
-                .filter(
-                    ScreenshareCapture.meeting_id == meeting_id,
-                    ScreenshareCapture.vision_analysis.isnot(None)
-                )
-            
-            if last_checkpoint_time:
-                screenshot_query = screenshot_query.filter(
-                    ScreenshareCapture.created_at > last_checkpoint_time
-                )
-            
-            new_screenshots = screenshot_query.order_by(ScreenshareCapture.captured_at).all()
-            logger.info(f"📸 Found {len(new_screenshots)} new screenshots (Meeting: {meeting_id})")
-            
-            # 3. Deduplicate slides
-            unique_slides = self.deduplicate_slides(new_screenshots)
+            # 3. Deduplicate slides (CPU work)
+            unique_slides_data = self._deduplicate_slides_from_data(screenshots_data)
             
             slide_text = "\n".join([
-                f"[{s.captured_at}] {s.vision_analysis}"
-                for s in unique_slides
+                f"[{s['captured_at']}] {s['vision_analysis']}"
+                for s in unique_slides_data
             ])
             
-            # 4. Generate meeting summary (use recent transcripts for now)
+            # 4. Generate meeting summary
             meeting_summary = transcript_text[:5000]  # Limit size
             
-            # 5. Call API
+            # 5. Call Palantir API (10-60 seconds I/O - no DB connection held!)
             logger.info(f"📤 Calling non-voting assistant API for meeting {meeting_id} at chunk {chunk_id}")
             api_response = await self.send_non_voting_request(
                 meeting_summary=meeting_summary,
@@ -316,28 +350,33 @@ class PalantirService:
             
             logger.info(f"✅ Non-voting API response received for meeting {meeting_id}")
             
-            # 6. Store in database
-            response_value = api_response.get('value', {})
+            # Phase 3: Quick DB write, release connection
+            db = SessionLocal()
+            try:
+                # 6. Store in database
+                response_value = api_response.get('value', {})
+                
+                db_record = NonVotingAssistantResponse(
+                    meeting_id=meeting_id,
+                    triggered_at_chunk_id=chunk_id,
+                    transcript_count=len(transcripts_data),
+                    unique_slide_count=len(unique_slides_data),
+                    screenshot_ids=[s['id'] for s in unique_slides_data],
+                    suggested_questions=response_value.get('suggested_questions', []),
+                    quotes=response_value.get('quotes', []),
+                    engagement_points=response_value.get('engagement_points', []),
+                    non_voting_opinions=response_value.get('non_voting_opinions', []),
+                    api_response_status='completed'
+                )
+                
+                db.add(db_record)
+                db.commit()
+                logger.info(f"💾 Stored non-voting response in database for meeting {meeting_id}")
+                logger.info(f"   Questions: {len(response_value.get('suggested_questions', []))}, Quotes: {len(response_value.get('quotes', []))}, Engagement Points: {len(response_value.get('engagement_points', []))}, Opinions: {len(response_value.get('non_voting_opinions', []))}")
+            finally:
+                db.close()  # Release after ~50ms
             
-            db_record = NonVotingAssistantResponse(
-                meeting_id=meeting_id,
-                triggered_at_chunk_id=chunk_id,
-                transcript_count=len(new_transcripts),
-                unique_slide_count=len(unique_slides),
-                screenshot_ids=[str(s.id) for s in unique_slides],
-                suggested_questions=response_value.get('suggested_questions', []),
-                quotes=response_value.get('quotes', []),
-                engagement_points=response_value.get('engagement_points', []),
-                non_voting_opinions=response_value.get('non_voting_opinions', []),
-                api_response_status='completed'
-            )
-            
-            db.add(db_record)
-            db.commit()
-            logger.info(f"💾 Stored non-voting response in database for meeting {meeting_id}")
-            logger.info(f"   Questions: {len(response_value.get('suggested_questions', []))}, Quotes: {len(response_value.get('quotes', []))}, Engagement Points: {len(response_value.get('engagement_points', []))}, Opinions: {len(response_value.get('non_voting_opinions', []))}")
-            
-            # 7. Broadcast via WebSocket with screenshot URLs
+            # 7. Broadcast via WebSocket (no DB connection needed)
             from app.api.websocket import manager
             
             broadcast_data = {
@@ -350,27 +389,27 @@ class PalantirService:
                 "non_voting_opinions": response_value.get('non_voting_opinions', []),
                 "new_transcripts": [
                     {
-                        "timestamp": t.start_time.isoformat(),
-                        "speaker_name": t.speaker_name,
-                        "transcript": t.transcript_text
+                        "timestamp": t['start_time'].isoformat(),
+                        "speaker_name": t['speaker_name'],
+                        "transcript": t['transcript_text']
                     }
-                    for t in new_transcripts
+                    for t in transcripts_data
                 ],
                 "new_slides": [
                     {
-                        "screenshot_id": str(s.id),
-                        "screenshot_url": f"/api/screenshots/image/{s.id}",
-                        "analysis": s.vision_analysis,
-                        "captured_at": s.captured_at.isoformat()
+                        "screenshot_id": s['id'],
+                        "screenshot_url": f"/api/screenshots/image/{s['id']}",
+                        "analysis": s['vision_analysis'],
+                        "captured_at": s['captured_at'].isoformat()
                     }
-                    for s in unique_slides
+                    for s in unique_slides_data
                 ],
-                "unique_slide_count": len(unique_slides)
+                "unique_slide_count": len(unique_slides_data)
             }
             
             manager.broadcast_non_voting_assistant_sync(str(meeting_id), broadcast_data)
             logger.info(f"📡 Broadcasted non-voting response via WebSocket for meeting {meeting_id}")
-            logger.info(f"   Sent {len(new_transcripts)} transcripts and {len(unique_slides)} unique slides to subscribers (Meeting: {meeting_id})")
+            logger.info(f"   Sent {len(transcripts_data)} transcripts and {len(unique_slides_data)} unique slides to subscribers (Meeting: {meeting_id})")
             
             logger.info(f"✅ Non-voting checkpoint completed successfully for meeting {meeting_id} at chunk {chunk_id}")
             
@@ -378,6 +417,43 @@ class PalantirService:
             logger.error(f"❌ Non-voting checkpoint failed for meeting {meeting_id} at chunk {chunk_id}: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
+    
+    def _deduplicate_slides_from_data(self, slides_data: List[dict]) -> List[dict]:
+        """
+        Remove duplicate slides using text similarity on vision_analysis.
+        Uses 80% similarity threshold.
+        
+        Works with plain dict data (no SQLAlchemy objects) for use after DB connection closes.
+        
+        Args:
+            slides_data: List of dicts with 'id', 'vision_analysis', 'captured_at' keys
+            
+        Returns:
+            List of unique slide dicts
+        """
+        if not slides_data:
+            return []
+        
+        unique_slides = [slides_data[0]]  # First slide is always unique
+        
+        for current in slides_data[1:]:
+            last_unique = unique_slides[-1]
+            
+            # Calculate text similarity
+            similarity = SequenceMatcher(
+                None,
+                last_unique.get('vision_analysis') or "",
+                current.get('vision_analysis') or ""
+            ).ratio()
+            
+            # If similarity < 80%, it's a new slide
+            if similarity < 0.80:
+                unique_slides.append(current)
+            else:
+                logger.debug(f"Skipping duplicate slide (similarity: {similarity:.2%})")
+        
+        logger.info(f"📊 Deduplicated slides: {len(slides_data)} → {len(unique_slides)} unique")
+        return unique_slides
 
 
 # Singleton instance

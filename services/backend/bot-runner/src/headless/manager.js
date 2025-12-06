@@ -1,55 +1,36 @@
 const puppeteer = require('puppeteer');
 const { config, validateConfig } = require('../lib/config');
 const { MultistreamWebexClient } = require('./webex-client-multistream');
+const { BrowserPool } = require('./browser-pool');
 
 /**
  * Headless Runner Manager
- * Manages Puppeteer browser instances and meeting sessions
+ * Manages browser pool and meeting sessions for high concurrency
+ * Architecture: 40 browsers × 10 pages = 400 meeting capacity
  */
 class HeadlessRunner {
   constructor() {
-    this.browser = null;
+    this.browserPool = null;
     this.activeMeetings = new Map();
     this.isRunning = false;
   }
 
   /**
-   * Start the headless runner
+   * Start the headless runner with browser pool
    */
   async start() {
     try {
-      console.log('🚀 Starting Headless Runner...');
+      console.log('🚀 Starting Headless Runner...\n');
       
       // Validate configuration
       validateConfig();
-      console.log('✅ Configuration validated');
+      console.log('✅ Configuration validated\n');
       
-      // Launch Puppeteer browser with Webex-compatible settings
-      this.browser = await puppeteer.launch({
-        headless: 'new', // Use new headless mode
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-web-security', // For Webex SDK
-          '--allow-running-insecure-content',
-          '--use-fake-ui-for-media-stream', // Auto-grant media permissions
-          '--use-fake-device-for-media-stream', // Create fake audio/video devices for headless
-          '--enable-usermedia-screen-capturing', // Enable media capture
-          '--allow-http-screen-capture', // Allow screen/media capture over HTTP
-          '--enable-features=WebRTC',
-          '--disable-features=VizDisplayCompositor', // For better audio support
-          '--allow-cross-origin-auth-prompt',
-          '--autoplay-policy=no-user-gesture-required',
-          '--window-size=1280,720' // Match viewport size for media features
-        ],
-        defaultViewport: {
-          width: 1280,
-          height: 720
-        }
+      // Create browser pool (browsers will launch on-demand)
+      this.browserPool = new BrowserPool({
+        maxBrowsers: 40,
+        pagesPerBrowser: 10
       });
-
-      console.log('✅ Puppeteer browser launched successfully');
       
       // Start API server
       await this.startAPIServer();
@@ -57,6 +38,7 @@ class HeadlessRunner {
       this.isRunning = true;
       console.log('🎉 Headless Runner is ready!');
       console.log('📡 API available at http://localhost:3001');
+      console.log('💡 Browsers will launch on-demand as meetings join\n');
       
       // Keep the process running
       await this.waitForever();
@@ -80,11 +62,34 @@ class HeadlessRunner {
     
     // Health check
     app.get('/health', (req, res) => {
+      const poolStats = this.browserPool ? this.browserPool.getStats() : null;
+      
       res.json({ 
         status: 'ok', 
-        mode: 'headless',
+        mode: 'headless-pool',
         activeMeetings: this.activeMeetings.size,
-        browserConnected: !!this.browser && this.browser.isConnected()
+        pool: poolStats ? {
+          totalCapacity: poolStats.totalCapacity,
+          currentUsage: poolStats.totalUsage,
+          utilizationPercent: poolStats.utilizationPercent,
+          availableSlots: poolStats.totalCapacity - poolStats.totalUsage
+        } : null
+      });
+    });
+    
+    // Pool stats endpoint
+    app.get('/pool/stats', (req, res) => {
+      if (!this.browserPool) {
+        return res.status(503).json({
+          success: false,
+          error: 'Browser pool not initialized'
+        });
+      }
+      
+      const stats = this.browserPool.getStats();
+      res.json({
+        success: true,
+        ...stats
       });
     });
     
@@ -106,14 +111,27 @@ class HeadlessRunner {
           console.log(`📋 Embedded app workflow - Meeting UUID: ${meetingUuid}`);
         }
         
-        // Create new page for this meeting
-        const page = await this.browser.newPage();
+        // Get available browser from pool
+        let browserInfo;
+        try {
+          browserInfo = await this.browserPool.getAvailableBrowser(meetingUuid);
+        } catch (poolError) {
+          console.error(`❌ ${poolError.message}`);
+          return res.status(503).json({
+            success: false,
+            error: 'All browsers at capacity',
+            message: poolError.message
+          });
+        }
         
-        // Set page timeout to allow for longer initialization (especially for addMedia in GCP)
+        // Create new page from pooled browser
+        const page = await browserInfo.browser.newPage();
+        
+        // Set page timeout to allow for longer initialization
         page.setDefaultTimeout(120000); // 2 minutes for all operations
         
         // Grant microphone permissions for known Webex domains
-        const context = this.browser.defaultBrowserContext();
+        const context = browserInfo.browser.defaultBrowserContext();
         try {
           await context.overridePermissions('https://unpkg.com', ['microphone', 'camera']);
           await context.overridePermissions('https://webexapis.com', ['microphone', 'camera']);
@@ -135,11 +153,13 @@ class HeadlessRunner {
           
           // Check if join was actually successful
           if (result && result.success !== false) {
-            // Store meeting session
+            // Store meeting session with browser info
             const meetingId = result.meetingId || tempMeetingId;
             this.activeMeetings.set(meetingId, { 
               page, 
               webexClient, 
+              browser: browserInfo.browser,
+              browserIndex: browserInfo.browserIndex,
               meetingUrl,
               startTime: new Date().toISOString()
             });
@@ -150,12 +170,16 @@ class HeadlessRunner {
             res.json({ 
               success: true, 
               meetingId: meetingId,
-              message: 'Meeting joined successfully'
+              message: 'Meeting joined successfully',
+              browserIndex: browserInfo.browserIndex
             });
           } else {
-            // Join failed - error already logged by client
+            // Join failed - release browser and clean up
             const errorMsg = result?.error || 'Unknown error';
             console.error(`❌ Meeting join failed: ${errorMsg}`);
+            
+            // Release browser slot
+            this.browserPool.releaseBrowser(browserInfo.browser, meetingUuid);
             
             // Clean up page
             try {
@@ -173,6 +197,9 @@ class HeadlessRunner {
           }
         } catch (error) {
           console.error('❌ Join error (exception):', error);
+          
+          // Release browser slot
+          this.browserPool.releaseBrowser(browserInfo.browser, meetingUuid);
           
           // Clean up page if join fails
           try {
@@ -210,16 +237,20 @@ class HeadlessRunner {
           });
         }
         
-        console.log(`📞 Leave meeting request received`);
+        console.log(`📞 Leave meeting request received - ID: ${meetingId}`);
         
         if (this.activeMeetings.has(meetingId)) {
-          const { webexClient } = this.activeMeetings.get(meetingId);
+          const { webexClient, browser } = this.activeMeetings.get(meetingId);
           
-          // Cleanup handles everything including closing browser
+          // Cleanup handles everything including closing page
           await webexClient.cleanup();
+          
+          // Release browser slot back to pool
+          this.browserPool.releaseBrowser(browser, meetingId);
+          
           this.activeMeetings.delete(meetingId);
           
-          console.log(`✅ Meeting left successfully`);
+          console.log(`✅ Meeting left successfully - ID: ${meetingId}`);
           
           res.json({ 
             success: true, 
@@ -285,8 +316,9 @@ class HeadlessRunner {
       console.log('🌐 API server started on port 3001');
       console.log('📋 Available endpoints:');
       console.log('   GET  /health');
+      console.log('   GET  /pool/stats');
       console.log('   POST /join  (body: {meetingUrl, meetingUuid?, hostEmail?})');
-      console.log('   POST /leave');
+      console.log('   POST /leave (body: {meetingId})');
       console.log('   GET  /meetings');
       console.log('   GET  /meetings/:id/status');
     });
@@ -302,16 +334,17 @@ class HeadlessRunner {
       console.log('🛑 Stopping Headless Runner...');
       
       // Close all active meetings
-      for (const [meetingId, { page }] of this.activeMeetings) {
-        console.log(`📞 Closing active meeting`);
+      for (const [meetingId, { page, browser }] of this.activeMeetings) {
+        console.log(`📞 Closing active meeting: ${meetingId}`);
         await page.close();
+        this.browserPool.releaseBrowser(browser, meetingId);
       }
       this.activeMeetings.clear();
       
-      // Close browser
-      if (this.browser) {
-        await this.browser.close();
-        this.browser = null;
+      // Close browser pool
+      if (this.browserPool) {
+        await this.browserPool.close();
+        this.browserPool = null;
       }
       
       // Close server

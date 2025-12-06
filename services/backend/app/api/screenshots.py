@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List
-from app.core.database import get_db
+from app.core.database import get_db, SessionLocal
 from app.core.auth import verify_bot_token
 from app.core.config import settings
 from app.models.screenshare_capture import ScreenshareCapture
@@ -36,7 +36,6 @@ class SaveScreenshotResponse(BaseModel):
 
 @router.post("/screenshots/capture", response_model=SaveScreenshotResponse)
 async def save_screenshot(
-    background_tasks: BackgroundTasks,
     meeting_id: str = Form(...),
     chunk_id: int = Form(...),
     captured_at: str = Form(...),
@@ -87,10 +86,10 @@ async def save_screenshot(
         
         logger.info(f"📸 Screenshot saved - Meeting: {meeting_id}, Chunk: {chunk_id}, Size: {len(screenshot_data)} bytes")
         
-        # Trigger background vision analysis
-        from app.services.vision_service import groq_vision_service
-        background_tasks.add_task(analyze_screenshot_async, str(screenshot.id), groq_vision_service)
-        logger.info(f"🔄 Vision analysis queued for screenshot: {screenshot.id}")
+        # Queue vision analysis to Celery (persistent task queue)
+        from app.tasks.vision import analyze_screenshot
+        analyze_screenshot.delay(str(screenshot.id))
+        logger.info(f"🔄 Vision analysis queued [Celery] for screenshot: {screenshot.id}")
         
         return SaveScreenshotResponse(
             status="saved",
@@ -108,60 +107,77 @@ async def save_screenshot(
 
 async def analyze_screenshot_async(screenshot_uuid: str, vision_service):
     """
-    Background task to analyze a screenshot using vision model
+    Background task to analyze a screenshot using vision model.
+    
+    Optimized for high concurrency using 3-phase connection management:
+    Phase 1: Quick DB read (20ms) → copy data → release connection
+    Phase 2: Vision API call (5-10s) WITHOUT holding DB connection
+    Phase 3: Quick DB write (20ms) → release connection
+    
+    Total connection hold time: ~40ms (vs 5-10 seconds before optimization)
     
     Args:
         screenshot_uuid: UUID of the screenshot to analyze
         vision_service: GroqVisionService instance
     """
     from app.core.database import SessionLocal
+    from app.models.screenshare_capture import ScreenshareCapture
     
+    # Phase 1: Quick DB read, copy data, release connection
     db = SessionLocal()
     try:
-        # Get the screenshot from database
         screenshot = db.query(ScreenshareCapture).filter(ScreenshareCapture.id == screenshot_uuid).first()
         
-        if not screenshot:
-            logger.error(f"❌ Screenshot {screenshot_uuid} not found in database")
-            return
-        
-        if not screenshot.screenshot_image:
-            logger.error(f"❌ Screenshot {screenshot_uuid} has no image data")
+        if not screenshot or not screenshot.screenshot_image:
+            logger.error(f"❌ Screenshot {screenshot_uuid} not found or has no image data")
             return
         
         # Update status to processing
         screenshot.analysis_status = "processing"
         db.commit()
         
-        logger.info(f"🔄 Starting vision analysis for screenshot: {screenshot.id}")
+        # Copy data we need (so we can release the connection)
+        screenshot_image = screenshot.screenshot_image
+        screenshot_id = screenshot.id
         
-        # Analyze using Groq vision service
-        result = await vision_service.analyze_screenshot(screenshot.screenshot_image)
+        logger.info(f"🔄 Starting vision analysis for screenshot: {screenshot_id}")
+    finally:
+        db.close()  # Release after ~20ms
+    
+    # Phase 2: Vision API call WITHOUT holding DB connection (5-10 seconds)
+    try:
+        result = await vision_service.analyze_screenshot(screenshot_image)
         
-        # Update database with result
-        if result['success']:
+        if not result['success']:
+            raise Exception(f"Vision analysis failed: {result['error']}")
+            
+    except Exception as e:
+        # Mark as failed in database
+        db = SessionLocal()
+        try:
+            screenshot = db.query(ScreenshareCapture).filter(ScreenshareCapture.id == screenshot_id).first()
+            if screenshot:
+                screenshot.analysis_status = "failed"
+                db.commit()
+        finally:
+            db.close()
+        
+        logger.error(f"❌ Vision analysis failed for screenshot: {screenshot_id}: {str(e)}")
+        return
+    
+    # Phase 3: Quick DB write, release connection
+    db = SessionLocal()
+    try:
+        screenshot = db.query(ScreenshareCapture).filter(ScreenshareCapture.id == screenshot_id).first()
+        if screenshot:
             screenshot.vision_analysis = result['analysis']
             screenshot.vision_model_used = result.get('model_used', settings.vision_model)
             screenshot.analysis_status = "completed"
-            
             db.commit()
             
-            logger.info(f"✅ Vision analysis completed for screenshot: {screenshot.id} ({len(result['analysis'])} chars)")
-        else:
-            screenshot.analysis_status = "failed"
-            db.commit()
-            logger.error(f"❌ Vision analysis failed for screenshot: {screenshot.id}: {result['error']}")
-        
-    except Exception as e:
-        # Mark as failed on any error
-        if 'screenshot' in locals():
-            screenshot.analysis_status = "failed"
-            db.commit()
-        
-        logger.error(f"❌ Background vision analysis failed for screenshot {screenshot_uuid}: {str(e)}")
-        
+            logger.info(f"✅ Vision analysis completed for screenshot: {screenshot_id} ({len(result['analysis'])} chars)")
     finally:
-        db.close()
+        db.close()  # Release after ~20ms
 
 
 @router.get("/screenshots/{meeting_id}", response_model=List[ScreenshotResponse])

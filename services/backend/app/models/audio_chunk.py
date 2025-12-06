@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, LargeBinary, Boolean, DateTime, Integer, func, ForeignKey
+from sqlalchemy import Column, String, LargeBinary, Boolean, DateTime, Integer, func, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
@@ -28,6 +28,14 @@ class AudioChunk(Base):
     meeting = relationship("Meeting", back_populates="audio_chunks")
     speaker_transcripts = relationship("SpeakerTranscript", back_populates="source_audio_chunk")
     screenshare_captures = relationship("ScreenshareCapture", back_populates="audio_chunk")
+    
+    # Composite indexes for common query patterns
+    __table_args__ = (
+        # Query: Get pending/processing chunks for a meeting
+        Index('idx_audio_meeting_status', 'meeting_id', 'transcription_status'),
+        # Query: Get chunks in order for a meeting
+        Index('idx_audio_meeting_chunk', 'meeting_id', 'chunk_id'),
+    )
     
     def __repr__(self):
         return f"<AudioChunk(id={self.id}, meeting_id={self.meeting_id}, chunk_id={self.chunk_id})>"

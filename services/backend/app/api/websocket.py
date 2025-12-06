@@ -4,8 +4,10 @@ from sqlalchemy.orm import Session
 import json
 import logging
 import asyncio
+import redis
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.models.meeting import Meeting
 
 logger = logging.getLogger(__name__)
@@ -15,11 +17,85 @@ router = APIRouter()
 # Store the main event loop for thread-safe broadcasting
 _main_loop = None
 
+# Redis client for pub/sub (used by Celery workers to send broadcasts)
+_redis_client = None
+
+def get_redis_client():
+    """Get or create Redis client for pub/sub"""
+    global _redis_client
+    if _redis_client is None:
+        try:
+            _redis_client = redis.from_url(settings.redis_url)
+            _redis_client.ping()  # Test connection
+            logger.info("📡 Redis client connected for WebSocket pub/sub")
+        except Exception as e:
+            logger.warning(f"⚠️ Redis not available for pub/sub: {e}")
+            _redis_client = None
+    return _redis_client
+
 def set_main_loop():
     """Set the main event loop (call this from startup)"""
     global _main_loop
     _main_loop = asyncio.get_event_loop()
     logger.info("📡 Main event loop stored for WebSocket broadcasts")
+
+
+async def redis_subscriber():
+    """
+    Subscribe to Redis pub/sub channel and broadcast messages via WebSocket.
+    This runs in the FastAPI process to receive broadcasts from Celery workers.
+    """
+    redis_client = get_redis_client()
+    if not redis_client:
+        logger.warning("⚠️ Redis not available - Celery broadcasts will not work")
+        return
+    
+    try:
+        pubsub = redis_client.pubsub()
+        pubsub.subscribe("websocket_broadcasts")
+        logger.info("📡 Subscribed to Redis websocket_broadcasts channel")
+        
+        while True:
+            try:
+                message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message and message["type"] == "message":
+                    data = json.loads(message["data"])
+                    msg_type = data.get("type")
+                    meeting_id = data.get("meeting_id")
+                    payload = data.get("data")
+                    
+                    if msg_type == "transcript":
+                        await manager.broadcast_transcript(meeting_id, payload)
+                    elif msg_type == "summary":
+                        await manager.broadcast_summary(meeting_id, payload.get("summary", ""))
+                    elif msg_type == "non_voting_assistant":
+                        await manager.broadcast_non_voting_assistant(meeting_id, payload)
+                    
+                    logger.debug(f"📡 Received and broadcast {msg_type} from Redis for meeting {meeting_id}")
+                
+                # Small sleep to prevent busy loop
+                await asyncio.sleep(0.01)
+                
+            except Exception as e:
+                logger.error(f"❌ Error processing Redis message: {e}")
+                await asyncio.sleep(1)
+                
+    except Exception as e:
+        logger.error(f"❌ Redis subscriber error: {e}")
+    finally:
+        try:
+            pubsub.unsubscribe()
+            pubsub.close()
+        except:
+            pass
+
+
+def start_redis_subscriber():
+    """Start the Redis subscriber as a background task"""
+    global _main_loop
+    if _main_loop:
+        asyncio.run_coroutine_threadsafe(redis_subscriber(), _main_loop)
+        logger.info("📡 Started Redis subscriber for Celery broadcasts")
 
 
 class ConnectionManager:
@@ -100,7 +176,25 @@ class ConnectionManager:
             )
             logger.debug(f"📡 Scheduled transcript broadcast for meeting {meeting_id}")
         else:
-            logger.warning(f"⚠️ Cannot broadcast - no main loop available")
+            # Use Redis pub/sub when called from Celery worker
+            self._publish_to_redis("transcript", meeting_id, transcript_data)
+    
+    def _publish_to_redis(self, msg_type: str, meeting_id: str, data: dict):
+        """Publish message to Redis for FastAPI to pick up and broadcast"""
+        redis_client = get_redis_client()
+        if redis_client:
+            try:
+                message = json.dumps({
+                    "type": msg_type,
+                    "meeting_id": meeting_id,
+                    "data": data
+                })
+                redis_client.publish("websocket_broadcasts", message)
+                logger.info(f"📡 Published {msg_type} to Redis for meeting {meeting_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to publish to Redis: {e}")
+        else:
+            logger.warning(f"⚠️ Cannot broadcast {msg_type} - no Redis or main loop available")
     
     async def broadcast_summary(self, meeting_id: str, summary: str):
         """Broadcast meeting summary to all subscribers"""
@@ -124,7 +218,8 @@ class ConnectionManager:
             )
             logger.debug(f"📡 Scheduled summary broadcast for meeting {meeting_id}")
         else:
-            logger.warning(f"⚠️ Cannot broadcast summary - no main loop available")
+            # Use Redis pub/sub when called from Celery worker
+            self._publish_to_redis("summary", meeting_id, {"meeting_id": meeting_id, "summary": summary})
     
     async def broadcast_non_voting_assistant(self, meeting_id: str, response_data: dict):
         """Broadcast non-voting assistant response to all subscribers"""
@@ -145,7 +240,8 @@ class ConnectionManager:
             )
             logger.debug(f"📡 Scheduled non-voting assistant broadcast for meeting {meeting_id}")
         else:
-            logger.warning(f"⚠️ Cannot broadcast non-voting assistant - no main loop available")
+            # Use Redis pub/sub when called from Celery worker
+            self._publish_to_redis("non_voting_assistant", meeting_id, response_data)
     
     async def broadcast_status(self, meeting_id: str, is_active: bool):
         """Broadcast meeting status change to all subscribers"""
@@ -225,6 +321,8 @@ async def websocket_meeting_by_link_endpoint(websocket: WebSocket, link: str = Q
     Since meeting URLs can have multiple instances (recurring meetings), this endpoint
     retrieves the most recent meeting for the provided URL.
     
+    Supports both exact matches and personal room links (e.g., /meet/username).
+    
     URL: ws://localhost:8080/ws/meeting-by-link?link={meeting_url}
     """
     # Accept the connection first to send error messages if needed
@@ -233,12 +331,27 @@ async def websocket_meeting_by_link_endpoint(websocket: WebSocket, link: str = Q
     try:
         # Get database session - we need to do this manually since Depends doesn't work in WebSocket
         from app.core.database import SessionLocal
+        import re
         db = SessionLocal()
         
         try:
-            # Find the most recent meeting with this URL
+            # Try exact match first
             meeting = db.query(Meeting).filter(
                 Meeting.meeting_link == link
+            ).order_by(Meeting.created_at.desc()).first()
+            
+            # If no exact match, try matching personal room links
+            # User inputs: https://domain.webex.com/meet/username
+            # Stored as: https://domain.webex.com/join/username (Webex API format)
+            if not meeting:
+                personal_room_match = re.search(r'/meet/([^/?]+)', link)
+                if personal_room_match:
+                    username = personal_room_match.group(1)
+                    logger.info(f"🔍 Trying personal room match for username: {username}")
+                    
+                    # Search for meetings with /join/{username} (how Webex API stores it)
+                    meeting = db.query(Meeting).filter(
+                        Meeting.meeting_link.ilike(f'%/join/{username}%')
             ).order_by(Meeting.created_at.desc()).first()
             
             if not meeting:

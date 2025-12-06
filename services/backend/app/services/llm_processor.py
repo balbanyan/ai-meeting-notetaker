@@ -4,6 +4,12 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.speaker_transcript import SpeakerTranscript
 from app.models.meeting import Meeting
+from app.core.database import SessionLocal
+from app.api.websocket import manager
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def process_transcripts_with_llm(
@@ -55,13 +61,18 @@ def process_transcripts_with_llm(
     return completion.choices[0].message.content
 
 
-async def generate_meeting_summary(meeting_id, db: Session) -> None:
+async def generate_meeting_summary(meeting_id, db_session: Session) -> None:
     """
     Background task to generate meeting summary when bot leaves a meeting.
     
+    Optimized for high concurrency using 3-phase connection management:
+    Phase 1: Quick DB read (100ms) → copy data → release connection
+    Phase 2: LLM API call (5-30s) WITHOUT holding DB connection
+    Phase 3: Quick DB write (50ms) → release connection
+    
     Args:
         meeting_id: UUID of the meeting
-        db: SQLAlchemy database session
+        db_session: Database session (will be closed and reopened to avoid long hold times)
     
     This function:
     - Fetches all speaker transcripts for the meeting
@@ -69,66 +80,91 @@ async def generate_meeting_summary(meeting_id, db: Session) -> None:
     - Stores the summary in meeting.meeting_summary
     - On error: stores error message in meeting_summary
     """
+    
+    # Phase 1: Quick DB read, copy data, release connection
+    db = SessionLocal()
+    meeting_data = None
+    transcripts_data = []
+    
     try:
-        # Get the meeting
         meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
         if not meeting:
-            print(f"❌ Meeting {meeting_id} not found for summary generation")
+            logger.error(f"❌ Meeting {meeting_id} not found for summary generation")
             return
         
-        print(f"🤖 Generating meeting summary for meeting {meeting_id}")
+        logger.info(f"🤖 Generating meeting summary for meeting {meeting_id}")
         
-        # Fetch all speaker transcripts ordered chronologically
         transcripts = db.query(SpeakerTranscript).filter(
             SpeakerTranscript.meeting_id == meeting_id
         ).order_by(SpeakerTranscript.start_time.asc()).all()
         
-        # Handle case with no transcripts
         if not transcripts:
             meeting.meeting_summary = "No transcripts available - meeting may have had no recorded audio or speech."
             db.commit()
-            print(f"⚠️ No transcripts found for meeting {meeting_id}")
+            logger.warning(f"⚠️ No transcripts found for meeting {meeting_id}")
             return
         
-        # Default system prompt for MoM generation
+        # Copy data needed for LLM call and broadcast
+        meeting_data = {
+            "id": str(meeting.id),
+            "webex_meeting_id": meeting.webex_meeting_id
+        }
+        transcripts_data = [{
+            "speaker_name": t.speaker_name,
+            "transcript_text": t.transcript_text,
+            "start_time": t.start_time
+        } for t in transcripts]
+        
+    finally:
+        db.close() # Release after ~100ms
+    
+    # Phase 2: LLM API call WITHOUT holding DB connection
+    llm_response = ""
+    try:
         system_prompt = (
             "You are an expert meeting assistant. Generate a comprehensive meeting summary including: "
             "1) Key Discussion Points, 2) Decisions Made, 3) Action Items (with owners if mentioned), "
             "4) Next Steps. Be concise and professional."
         )
         
-        # Generate summary using LLM
+        # Reconstruct SpeakerTranscript objects for process_transcripts_with_llm
+        # This is a temporary measure until process_transcripts_with_llm is refactored to accept dicts
+        temp_transcripts = [
+            SpeakerTranscript(
+                speaker_name=t['speaker_name'],
+                transcript_text=t['transcript_text'],
+                start_time=t['start_time']
+            ) for t in transcripts_data
+        ]
+
         llm_response = process_transcripts_with_llm(
-            transcripts=transcripts,
+            transcripts=temp_transcripts,
             system_prompt=system_prompt,
             model=settings.llm_model
         )
         
-        # Store the summary
-        meeting.meeting_summary = llm_response
-        db.commit()
-        
-        print(f"✅ Meeting summary generated successfully for meeting {meeting_id}")
+    except Exception as e:
+        error_msg = f"Error generating summary: {str(e)}"
+        logger.error(f"❌ {error_msg}")
+        llm_response = error_msg # Store error in summary
+    
+    # Phase 3: Quick DB write, release connection
+    db = SessionLocal()
+    try:
+        meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+        if meeting:
+            meeting.meeting_summary = llm_response
+            db.commit()
+            logger.info(f"✅ Meeting summary generated successfully for meeting {meeting_id}")
         
         # Broadcast summary via WebSocket to both IDs
-        try:
-            from app.api.websocket import manager
-            manager.broadcast_summary_sync(str(meeting_id), llm_response)  # UUID
-            if meeting.webex_meeting_id:
-                manager.broadcast_summary_sync(meeting.webex_meeting_id, llm_response)  # Webex ID
-        except Exception as ws_error:
-            print(f"⚠️ Failed to broadcast summary via WebSocket: {str(ws_error)}")
+        if meeting_data:
+            manager.broadcast_summary_sync(meeting_data["id"], llm_response)  # UUID
+            if meeting_data["webex_meeting_id"]:
+                manager.broadcast_summary_sync(meeting_data["webex_meeting_id"], llm_response)  # Webex ID
+            logger.info(f"📡 Broadcasted summary via WebSocket to subscribers (Webex ID + UUID)")
         
     except Exception as e:
-        # Store error message in meeting_summary for debugging
-        error_msg = f"Error generating summary: {str(e)}"
-        print(f"❌ {error_msg}")
-        
-        try:
-            meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
-            if meeting:
-                meeting.meeting_summary = error_msg
-                db.commit()
-        except Exception as commit_error:
-            print(f"❌ Failed to store error message: {str(commit_error)}")
-
+        logger.error(f"❌ Failed to store or broadcast summary for meeting {meeting_id}: {str(e)}")
+    finally:
+        db.close() # Release after ~50ms

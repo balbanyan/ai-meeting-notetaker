@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
@@ -30,7 +30,6 @@ class SaveChunkResponse(BaseModel):
 
 @router.post("/audio/chunk", response_model=SaveChunkResponse)
 async def save_audio_chunk(
-    background_tasks: BackgroundTasks,
     meeting_id: str = Form(...),
     chunk_id: int = Form(...),
     audio_started_at: str = Form(None),
@@ -86,10 +85,10 @@ async def save_audio_chunk(
             
         print(f"💾 CHUNK SAVED - Meeting: {meeting_id}, Chunk #{chunk_count}, Chunk UUID: {chunk.id}, Size: {len(audio_data)} bytes{format_info}")
         
-        # Trigger background transcription (Immediate Processing)
-        from app.services.transcription import transcribe_chunk_async
-        background_tasks.add_task(transcribe_chunk_async, str(chunk.id))
-        print(f"🔄 TRANSCRIPTION QUEUED - Meeting: {meeting_id}, Chunk UUID: {chunk.id}")
+        # Queue transcription to Celery (persistent task queue)
+        from app.tasks.transcription import transcribe_chunk
+        transcribe_chunk.delay(str(chunk.id))
+        print(f"🔄 TRANSCRIPTION QUEUED [Celery] - Meeting: {meeting_id}, Chunk UUID: {chunk.id}")
         
         return SaveChunkResponse(
             status="saved",

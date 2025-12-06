@@ -79,8 +79,11 @@ async def startup_event():
         create_tables()  # Handles concurrent initialization gracefully
     
     # Initialize WebSocket manager with main event loop
-    from app.api.websocket import set_main_loop
+    from app.api.websocket import set_main_loop, start_redis_subscriber
     set_main_loop()
+    
+    # Start Redis subscriber for Celery broadcasts
+    start_redis_subscriber()
     
     print("📦 Bot-runner will start on-demand when first meeting is joined")
 

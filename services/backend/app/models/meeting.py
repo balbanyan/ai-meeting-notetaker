@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, func, JSON, Text, Integer
+from sqlalchemy import Column, String, Boolean, DateTime, func, JSON, Text, Integer, Index
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 import uuid
@@ -50,6 +50,14 @@ class Meeting(Base):
     speaker_transcripts = relationship("SpeakerTranscript", back_populates="meeting")
     screenshare_captures = relationship("ScreenshareCapture", back_populates="meeting")
     non_voting_responses = relationship("NonVotingAssistantResponse", back_populates="meeting")
+    
+    # Composite indexes for common query patterns
+    __table_args__ = (
+        # Query: Find active meetings (for dashboard)
+        Index('idx_meeting_active_join', 'is_active', 'actual_join_time'),
+        # Query: Lookup meeting by webex ID and check if active
+        Index('idx_meeting_webex_active', 'webex_meeting_id', 'is_active'),
+    )
     
     def __repr__(self):
         return f"<Meeting(id={self.id}, webex_meeting_id={self.webex_meeting_id}, host_email={self.host_email})>"

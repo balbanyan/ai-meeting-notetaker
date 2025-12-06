@@ -1,10 +1,26 @@
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import QueuePool
 from app.core.config import settings
 
-# Create database engine
-engine = create_engine(settings.database_url)
+# Create database engine with connection pooling for high concurrency
+# Pool configuration for 100+ concurrent meetings:
+# - pool_size: Base connections always open (20)
+# - max_overflow: Additional connections when pool exhausted (80)
+# - Total capacity: 100 connections
+# - pool_timeout: Wait 30s for available connection before timeout
+# - pool_recycle: Recycle connections every hour to prevent stale connections
+# - pool_pre_ping: Verify connection health before checkout
+engine = create_engine(
+    settings.database_url,
+    poolclass=QueuePool,
+    pool_size=20,              # Base connections
+    max_overflow=80,           # Burst capacity (total: 100)
+    pool_timeout=30,           # Wait 30s for connection
+    pool_recycle=3600,         # Recycle connections every hour
+    pool_pre_ping=True         # Verify connection health
+)
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
