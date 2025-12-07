@@ -96,7 +96,7 @@ class HeadlessRunner {
     // Join meeting endpoint
     app.post('/join', async (req, res) => {
       try {
-        const { meetingUrl, meetingUuid, hostEmail } = req.body;
+        const { meetingUrl, meetingUuid, hostEmail, maxDurationMinutes } = req.body;
         
         if (!meetingUrl) {
           return res.status(400).json({ 
@@ -109,6 +109,9 @@ class HeadlessRunner {
         console.log(`📞 Join meeting request received${uuidInfo}`);
         if (meetingUuid) {
           console.log(`📋 Embedded app workflow - Meeting UUID: ${meetingUuid}`);
+        }
+        if (maxDurationMinutes) {
+          console.log(`⏱️ Max duration: ${maxDurationMinutes} minutes`);
         }
         
         // Get available browser from pool
@@ -149,7 +152,7 @@ class HeadlessRunner {
         
         // Join the meeting and wait for result before responding
         try {
-          const result = await webexClient.joinMeeting(meetingUrl, meetingUuid, hostEmail);
+          const result = await webexClient.joinMeeting(meetingUrl, meetingUuid, hostEmail, maxDurationMinutes);
           
           // Check if join was actually successful
           if (result && result.success !== false) {

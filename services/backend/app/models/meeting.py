@@ -11,10 +11,11 @@ class Meeting(Base):
     # Primary Key - Internal unique identifier
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     
-    # Webex Identifiers - webex_meeting_id is unique per meeting instance
+    # Webex Identifiers
+    # webex_meeting_id: Unique per session. For personal rooms, includes timestamp suffix (e.g., "abc123_20251211T163000Z")
     webex_meeting_id = Column(String(255), nullable=False, unique=True, index=True)
     meeting_number = Column(String(100), nullable=True, index=True)  # User-friendly numeric ID (e.g., "123 456 789")
-    meeting_link = Column(String(2048), nullable=False, index=True)
+    meeting_link = Column(String(2048), nullable=False, index=True)  # NOT unique - personal rooms share same link
     meeting_title = Column(String(500), nullable=True)  # Meeting title from Webex API
     
     # Meeting Details from List Meetings API
@@ -30,7 +31,7 @@ class Meeting(Base):
     is_active = Column(Boolean, default=False, index=True)
     
     # Meeting Classification
-    meeting_type = Column(String(50), nullable=True)  # meeting/webinar
+    meeting_type = Column(String(50), nullable=True)  # "meeting", "webinar", "personalRoomMeeting" (from scheduledType)
     
     # AI-Generated Content
     meeting_summary = Column(Text, nullable=True)  # LLM-generated meeting summary (MoM)

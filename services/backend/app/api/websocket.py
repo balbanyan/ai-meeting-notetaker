@@ -347,7 +347,7 @@ async def websocket_meeting_by_link_endpoint(websocket: WebSocket, link: str = Q
                 personal_room_match = re.search(r'/meet/([^/?]+)', link)
                 if personal_room_match:
                     username = personal_room_match.group(1)
-                    logger.info(f"🔍 Trying personal room match for username: {username}")
+                    logger.info(f"🔍 Trying personal room match")
                     
                     # Search for meetings with /join/{username} (how Webex API stores it)
                     meeting = db.query(Meeting).filter(

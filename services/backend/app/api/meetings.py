@@ -95,21 +95,7 @@ async def register_and_join_meeting(
     try:
         print(f"📱 REGISTER AND JOIN - Meeting ID: {request.meeting_id}")
         
-        # Check if meeting already exists (removed multiple bot restriction for testing)
-        existing_meeting = db.query(Meeting).filter(
-            Meeting.webex_meeting_id == request.meeting_id
-        ).first()
-        
-        # NOTE: Multiple bot restriction removed for testing
-        # if existing_meeting and existing_meeting.is_active:
-        #     meeting_uuid = str(existing_meeting.id)
-        #     print(f"⚠️ Bot is already active in this meeting (Meeting UUID: {meeting_uuid})")
-        #     raise HTTPException(
-        #         status_code=409,
-        #         detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
-        #     )
-        
-        # Fetch complete meeting data from Webex
+        # Fetch complete meeting data from Webex first (need scheduled_type for logic)
         from app.services.webex_api import WebexMeetingsAPI
         webex_api = WebexMeetingsAPI(
             client_id=settings.webex_client_id,
@@ -127,6 +113,50 @@ async def register_and_join_meeting(
         host_email = meeting_data["host_email"]
         participant_emails = meeting_data.get("participant_emails", [])
         cohost_emails = meeting_data.get("cohost_emails", [])
+        scheduled_type = meeting_data.get("scheduled_type")  # "meeting", "webinar", "personalRoomMeeting"
+        
+        # Save original Webex ID for WebSocket broadcasts (before any modification)
+        original_webex_id = request.meeting_id
+        
+        # For personal room meetings, append timestamp to create unique session ID
+        is_personal_room = scheduled_type == "personalRoomMeeting"
+        if is_personal_room:
+            stored_webex_id = f"{request.meeting_id}_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}"
+            print(f"🏠 Personal room detected - creating unique session ID: {stored_webex_id}")
+            
+            # Check for active bot in this personal room by meeting_link
+            active_session = db.query(Meeting).filter(
+                Meeting.meeting_link == meeting_link,
+                Meeting.is_active == True
+            ).first()
+            
+            if active_session:
+                meeting_uuid = str(active_session.id)
+                print(f"⚠️ Bot is already active in this personal room (Meeting UUID: {meeting_uuid})")
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Bot is already active in this personal room (Meeting UUID: {meeting_uuid})"
+                )
+        else:
+            stored_webex_id = request.meeting_id
+            
+            # Check if meeting already exists for non-personal rooms
+            existing_meeting = db.query(Meeting).filter(
+                Meeting.webex_meeting_id == request.meeting_id
+            ).first()
+            
+            if existing_meeting and existing_meeting.is_active:
+                meeting_uuid = str(existing_meeting.id)
+                print(f"⚠️ Bot is already active in this meeting (Meeting UUID: {meeting_uuid})")
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
+                )
+        
+        # For non-personal rooms, check if meeting exists (for update logic)
+        existing_meeting = None if is_personal_room else db.query(Meeting).filter(
+            Meeting.webex_meeting_id == request.meeting_id
+        ).first()
         
         # Parse datetime strings
         scheduled_start = None
@@ -144,8 +174,8 @@ async def register_and_join_meeting(
             print(f"⚠️ Could not parse end_time: {e}")
         
         # Update existing meeting or create new one
-        # Note: existing_meeting was already fetched and is_active was checked earlier
-        if existing_meeting:
+        # Note: For personal rooms, we always create new. For others, update if exists.
+        if existing_meeting and not is_personal_room:
             # Update existing meeting (we already know it's not active)
             print(f"🔄 Meeting exists - updating (UUID: {existing_meeting.id})")
             
@@ -166,9 +196,9 @@ async def register_and_join_meeting(
             if scheduled_end:
                 existing_meeting.scheduled_end_time = scheduled_end
             
-            # Update meeting type if provided
-            if meeting_data.get("meeting_type"):
-                existing_meeting.meeting_type = meeting_data["meeting_type"]
+            # Use scheduled_type for meeting_type (more accurate than meetingType)
+            if scheduled_type:
+                existing_meeting.meeting_type = scheduled_type
             
             db.commit()
             db.refresh(existing_meeting)
@@ -176,17 +206,17 @@ async def register_and_join_meeting(
             meeting_uuid = str(existing_meeting.id)
             
             # Broadcast status update via WebSocket to both IDs
-            # (HomePage uses UUID, EmbeddedApp uses Webex meeting ID)
+            # (HomePage uses UUID, EmbeddedApp uses original Webex meeting ID)
             from app.api.websocket import manager
-            await manager.broadcast_status(request.meeting_id, True)  # Webex meeting ID
+            await manager.broadcast_status(original_webex_id, True)  # Original Webex meeting ID
             await manager.broadcast_status(meeting_uuid, True)  # UUID
             print(f"📡 Broadcasted bot active status to WebSocket subscribers (Webex ID + UUID)")
         else:
-            # Create new meeting record
-            print(f"🆕 Creating new meeting record")
+            # Create new meeting record (always for personal rooms, or if not exists)
+            print(f"🆕 Creating new meeting record" + (" (personal room session)" if is_personal_room else ""))
             
             new_meeting = Meeting(
-                webex_meeting_id=request.meeting_id,
+                webex_meeting_id=stored_webex_id,  # Timestamped for personal rooms
                 meeting_number=meeting_number,
                 meeting_link=meeting_link,
                 meeting_title=meeting_title,
@@ -197,7 +227,7 @@ async def register_and_join_meeting(
                 scheduled_end_time=scheduled_end,
                 actual_join_time=datetime.utcnow(),
                 is_active=True,
-                meeting_type=meeting_data.get("meeting_type", "meeting")
+                meeting_type=scheduled_type or "meeting"  # Use scheduled_type (more accurate)
             )
             
             db.add(new_meeting)
@@ -208,9 +238,9 @@ async def register_and_join_meeting(
             print(f"✅ Meeting created - UUID: {meeting_uuid}")
             
             # Broadcast status update via WebSocket to both IDs
-            # (HomePage uses UUID, EmbeddedApp uses Webex meeting ID)
+            # (HomePage uses UUID, EmbeddedApp uses original Webex meeting ID)
             from app.api.websocket import manager
-            await manager.broadcast_status(request.meeting_id, True)  # Webex meeting ID
+            await manager.broadcast_status(original_webex_id, True)  # Original Webex meeting ID
             await manager.broadcast_status(meeting_uuid, True)  # UUID
             print(f"📡 Broadcasted bot active status to WebSocket subscribers (Webex ID + UUID)")
         
@@ -242,7 +272,8 @@ async def register_and_join_meeting(
                 payload = {
                     "meetingUrl": meeting_link,  # Use API-retrieved webLink
                     "meetingUuid": meeting_uuid,  # Pass meeting UUID from database
-                    "hostEmail": host_email  # Pass host email from API
+                    "hostEmail": host_email,  # Pass host email from API
+                    "maxDurationMinutes": settings.bot_max_duration_minutes  # Bot timeout duration
                 }
                 
                 bot_response = await client.post(
@@ -259,7 +290,7 @@ async def register_and_join_meeting(
                         
                         return RegisterAndJoinResponse(
                             meeting_uuid=meeting_uuid,
-                            webex_meeting_id=request.meeting_id,
+                            webex_meeting_id=original_webex_id,  # Return original ID (not timestamped)
                             status="success",
                             message="Meeting registered and bot join triggered successfully"
                         )
@@ -335,20 +366,6 @@ async def register_and_join_meeting_with_link(
                 detail="No meeting found with the provided link"
             )
         
-        # Check if meeting already exists (removed multiple bot restriction for testing)
-        existing_meeting = db.query(Meeting).filter(
-            Meeting.webex_meeting_id == webex_meeting_id
-        ).first()
-        
-        # NOTE: Multiple bot restriction removed for testing
-        # if existing_meeting and existing_meeting.is_active:
-        #     meeting_uuid = str(existing_meeting.id)
-        #     print(f"⚠️ Bot is already active in this meeting (Meeting UUID: {meeting_uuid})")
-        #     raise HTTPException(
-        #         status_code=409,
-        #         detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
-        #     )
-        
         # Fetch complete meeting data
         meeting_data = await webex_api.get_complete_meeting_data(webex_meeting_id)
         
@@ -359,6 +376,50 @@ async def register_and_join_meeting_with_link(
         host_email = meeting_data["host_email"]
         participant_emails = meeting_data.get("participant_emails", [])
         cohost_emails = meeting_data.get("cohost_emails", [])
+        scheduled_type = meeting_data.get("scheduled_type")  # "meeting", "webinar", "personalRoomMeeting"
+        
+        # Save original Webex ID for WebSocket broadcasts (before any modification)
+        original_webex_id = webex_meeting_id
+        
+        # For personal room meetings, append timestamp to create unique session ID
+        is_personal_room = scheduled_type == "personalRoomMeeting"
+        if is_personal_room:
+            stored_webex_id = f"{webex_meeting_id}_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}"
+            print(f"🏠 Personal room detected - creating unique session ID")
+            
+            # Check for active bot in this personal room by meeting_link
+            active_session = db.query(Meeting).filter(
+                Meeting.meeting_link == meeting_link,
+                Meeting.is_active == True
+            ).first()
+            
+            if active_session:
+                meeting_uuid = str(active_session.id)
+                print(f"⚠️ Bot is already active in this personal room (Meeting UUID: {meeting_uuid})")
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Bot is already active in this personal room (Meeting UUID: {meeting_uuid})"
+                )
+        else:
+            stored_webex_id = webex_meeting_id
+            
+            # Check if meeting already exists for non-personal rooms
+            existing_meeting = db.query(Meeting).filter(
+                Meeting.webex_meeting_id == webex_meeting_id
+            ).first()
+            
+            if existing_meeting and existing_meeting.is_active:
+                meeting_uuid = str(existing_meeting.id)
+                print(f"⚠️ Bot is already active in this meeting (Meeting UUID: {meeting_uuid})")
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Bot is already active in this meeting (Meeting UUID: {meeting_uuid})"
+                )
+        
+        # For non-personal rooms, check if meeting exists (for update logic)
+        existing_meeting = None if is_personal_room else db.query(Meeting).filter(
+            Meeting.webex_meeting_id == webex_meeting_id
+        ).first()
         
         # Parse datetime strings
         scheduled_start = None
@@ -376,8 +437,8 @@ async def register_and_join_meeting_with_link(
             print(f"⚠️ Could not parse end_time: {e}")
         
         # Update existing meeting or create new one
-        # Note: existing_meeting was already fetched and is_active was checked earlier
-        if existing_meeting:
+        # Note: For personal rooms, we always create new. For others, update if exists.
+        if existing_meeting and not is_personal_room:
             # Update existing meeting (we already know it's not active)
             meeting_uuid = str(existing_meeting.id)
             print(f"📝 Meeting exists - updating record (Meeting UUID: {meeting_uuid})")
@@ -388,7 +449,7 @@ async def register_and_join_meeting_with_link(
             existing_meeting.cohost_emails = cohost_emails
             existing_meeting.scheduled_start_time = scheduled_start
             existing_meeting.scheduled_end_time = scheduled_end
-            existing_meeting.meeting_type = meeting_data.get("meeting_type")
+            existing_meeting.meeting_type = scheduled_type  # Use scheduled_type (more accurate)
             existing_meeting.screenshots_enabled = settings.enable_screenshots  # Use .env setting
             # API parameters override .env if provided, otherwise use .env
             existing_meeting.non_voting_enabled = request.enable_non_voting if request.enable_non_voting is not None else settings.enable_non_voting
@@ -401,10 +462,10 @@ async def register_and_join_meeting_with_link(
             db.commit()
             db.refresh(existing_meeting)
         else:
-            # Create new meeting
-            print(f"✨ Creating new meeting record")
+            # Create new meeting (always for personal rooms, or if not exists)
+            print(f"✨ Creating new meeting record" + (" (personal room session)" if is_personal_room else ""))
             new_meeting = Meeting(
-                webex_meeting_id=webex_meeting_id,
+                webex_meeting_id=stored_webex_id,  # Timestamped for personal rooms
                 meeting_number=meeting_number,
                 meeting_link=meeting_link,
                 meeting_title=meeting_title,
@@ -413,7 +474,7 @@ async def register_and_join_meeting_with_link(
                 cohost_emails=cohost_emails,
                 scheduled_start_time=scheduled_start,
                 scheduled_end_time=scheduled_end,
-                meeting_type=meeting_data.get("meeting_type"),
+                meeting_type=scheduled_type or "meeting",  # Use scheduled_type (more accurate)
                 screenshots_enabled=settings.enable_screenshots,  # Use .env setting
                 # API parameters override .env if provided, otherwise use .env
                 non_voting_enabled=request.enable_non_voting if request.enable_non_voting is not None else settings.enable_non_voting,
@@ -459,7 +520,8 @@ async def register_and_join_meeting_with_link(
                 bot_payload = {
                     "meetingUrl": meeting_link,
                     "meetingUuid": meeting_uuid,
-                    "hostEmail": host_email
+                    "hostEmail": host_email,
+                    "maxDurationMinutes": settings.bot_max_duration_minutes  # Bot timeout duration
                 }
                 
                 bot_response = await client.post(

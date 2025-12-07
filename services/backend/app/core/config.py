@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     non_voting_assistant_url: str = ""
     non_voting_call_frequency: int = 20  # Call every N chunks
     
+    # Bot Settings
+    bot_max_duration_minutes: int = 180  # Max bot duration in meeting (3 hours default)
+    
     # Redis Settings (for Celery task queue)
     redis_url: str = "redis://localhost:6379/0"
     

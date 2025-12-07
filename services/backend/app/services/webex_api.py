@@ -39,7 +39,7 @@ class WebexMeetingsAPI:
         print("🔑 Generating OAuth access token from refresh token...")
         token_url = "https://webexapis.com/v1/access_token"
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:  # 30s timeout for cold start
             response = await client.post(
                 token_url,
                 data={
@@ -300,7 +300,8 @@ class WebexMeetingsAPI:
                 "participant_emails": invitees.get("participant_emails", []),
                 "cohost_emails": invitees.get("cohost_emails", []),
                 "title": admin_data.get("title"),
-                "meeting_type": admin_data.get("meeting_type")
+                "scheduled_type": admin_data.get("scheduled_type"),  # "meeting", "webinar", "personalRoomMeeting"
+                "meeting_type": admin_data.get("meeting_type")  # Keep for backwards compat
             }
             
             print(f"✅ Complete meeting data retrieved successfully")
@@ -368,8 +369,14 @@ class WebexMeetingsAPI:
                     print(f"❌ No meeting found with webLink")
                     return None
                 
+        except httpx.TimeoutException:
+            print(f"❌ Error finding meeting by link: Request timed out (cold start?)")
+            return None
+        except httpx.ConnectError as e:
+            print(f"❌ Error finding meeting by link: Connection failed - {str(e)}")
+            return None
         except Exception as e:
-            print(f"❌ Error finding meeting by link: {str(e)}")
+            print(f"❌ Error finding meeting by link: {type(e).__name__} - {str(e)}")
             return None
     
     async def get_complete_meeting_data_by_link(self, meeting_link: str) -> Dict:

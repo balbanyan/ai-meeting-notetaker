@@ -43,13 +43,24 @@ class MultistreamWebexClient {
   // MAIN WORKFLOW
   // ============================================================================
 
-  async joinMeeting(meetingUrl, meetingUuid, hostEmail = null) {
+  async joinMeeting(meetingUrl, meetingUuid, hostEmail = null, maxDurationMinutes = 180) {
     try {
       this.meetingUrl = meetingUrl;
       this.meetingUuid = meetingUuid;  // Passed from embedded app via backend
       this.hostEmail = hostEmail;  // Passed from embedded app
       
       this.logger(`🚀 Starting headless multistream meeting join (Meeting UUID: ${this.meetingUuid})...`, 'info');
+      
+      // Set up meeting timeout (auto-leave after max duration)
+      const duration = (maxDurationMinutes && maxDurationMinutes > 0) ? maxDurationMinutes : 180;
+      const maxDurationMs = duration * 60 * 1000;
+      
+      this.meetingTimeout = setTimeout(() => {
+        this.logger(`⏰ Bot timeout (${duration} minutes) reached, leaving meeting... (Meeting UUID: ${this.meetingUuid})`, 'warn');
+        this.cleanup();
+      }, maxDurationMs);
+      
+      this.logger(`⏱️ Bot timeout set: ${duration} minutes (Meeting UUID: ${this.meetingUuid})`, 'info');
       
       // Test backend connection
       await this.testBackendConnection();
@@ -1005,6 +1016,12 @@ class MultistreamWebexClient {
   // ============================================================================
 
   async cleanup() {
+    // Clear meeting timeout first (prevent firing during cleanup or after rejoin)
+    if (this.meetingTimeout) {
+      clearTimeout(this.meetingTimeout);
+      this.meetingTimeout = null;
+    }
+    
     // Guard against duplicate cleanup calls
     if (this.cleanupInProgress) {
       this.logger(`⚠️ Cleanup already in progress, skipping duplicate call (Meeting UUID: ${this.meetingUuid})`, 'warn');
