@@ -830,7 +830,7 @@ class MultistreamWebexClient {
         for (const event of events) {
           try {
             await this.backendClient.sendSpeakerEvent(event);
-            this.logger(`✅ Speaker event sent: ${event.member_name || event.member_id} (Meeting UUID: ${this.meetingUuid})`, 'success');
+            this.logger(`✅ Speaker event sent (Meeting UUID: ${this.meetingUuid})`, 'success');
           } catch (error) {
             this.logger(`❌ Failed to send speaker event: ${error.message}`, 'error');
           }

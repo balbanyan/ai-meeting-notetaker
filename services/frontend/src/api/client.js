@@ -102,7 +102,7 @@ async function apiCall(method, endpoint, body = null) {
  * @returns {Promise<Object>} Response from backend
  */
 export async function registerAndJoinMeeting(meetingData) {
-  return apiCall('POST', '/meetings/register-and-join', meetingData)
+  return apiCall('POST', '/api/meetings/register-and-join', meetingData)
 }
 
 /**
@@ -110,7 +110,7 @@ export async function registerAndJoinMeeting(meetingData) {
  * @returns {Promise<Object>} List of meetings with total count
  */
 export async function fetchMeetings() {
-  return apiCall('GET', '/meetings/list')
+  return apiCall('GET', '/api/meetings/list')
 }
 
 /**
@@ -119,7 +119,7 @@ export async function fetchMeetings() {
  * @returns {Promise<Object>} Meeting details with transcripts
  */
 export async function fetchMeetingDetails(meetingUuid) {
-  return apiCall('GET', `/meetings/${meetingUuid}`)
+  return apiCall('GET', `/api/meetings/${meetingUuid}`)
 }
 
 /**
@@ -129,7 +129,7 @@ export async function fetchMeetingDetails(meetingUuid) {
  */
 export async function getMeetingStatus(meetingId) {
   try {
-    const data = await apiCall('GET', `/meetings/${meetingId}`)
+    const data = await apiCall('GET', `/api/meetings/${meetingId}`)
     return { is_active: data.is_active || false }
   } catch (error) {
     // If meeting doesn't exist yet (404), treat as inactive

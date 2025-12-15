@@ -1,5 +1,6 @@
 import httpx
 import asyncio
+import time
 from typing import Optional, Dict, List
 from urllib.parse import quote
 
@@ -17,6 +18,22 @@ class WebexMeetingsAPI:
         self.refresh_token = refresh_token
         self.personal_token = personal_token  # Personal access token (overrides OAuth)
         self.access_token: Optional[str] = None  # Cached access token
+        self._client: Optional[httpx.AsyncClient] = None  # Shared HTTP client for connection pooling
+    
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create shared HTTP client with connection pooling."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=30.0,
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5)
+            )
+        return self._client
+    
+    async def close(self):
+        """Close the HTTP client. Call this when done with the API."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
     
     async def _get_access_token(self) -> str:
         """
@@ -39,33 +56,35 @@ class WebexMeetingsAPI:
         print("🔑 Generating OAuth access token from refresh token...")
         token_url = "https://webexapis.com/v1/access_token"
         
-        async with httpx.AsyncClient(timeout=30.0) as client:  # 30s timeout for cold start
-            response = await client.post(
-                token_url,
-                data={
-                    "grant_type": "refresh_token",  # Service Apps use refresh_token, not client_credentials
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                    "refresh_token": self.refresh_token
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"}
-            )
+        start_time = time.time()
+        client = await self._get_client()
+        response = await client.post(
+            token_url,
+            data={
+                "grant_type": "refresh_token",  # Service Apps use refresh_token, not client_credentials
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "refresh_token": self.refresh_token
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            self.access_token = data.get("access_token")
             
-            if response.status_code == 200:
-                data = response.json()
-                self.access_token = data.get("access_token")
-                
-                # Update refresh token if a new one is provided (silently cached)
-                new_refresh_token = data.get("refresh_token")
-                if new_refresh_token:
-                    self.refresh_token = new_refresh_token
-                
-                print("✅ OAuth access token generated successfully")
-                return self.access_token
-            else:
-                error_detail = response.text
-                print(f"❌ OAuth token generation failed: {response.status_code} - {error_detail}")
-                raise Exception(f"Failed to get access token: {response.status_code} - {error_detail}")
+            # Update refresh token if a new one is provided (silently cached)
+            new_refresh_token = data.get("refresh_token")
+            if new_refresh_token:
+                self.refresh_token = new_refresh_token
+            
+            elapsed = time.time() - start_time
+            print(f"✅ OAuth access token generated successfully ({elapsed:.2f}s)")
+            return self.access_token
+        else:
+            error_detail = response.text
+            print(f"❌ OAuth token generation failed: {response.status_code} - {error_detail}")
+            raise Exception(f"Failed to get access token: {response.status_code} - {error_detail}")
     
     async def get_meeting_by_id_admin(self, meeting_id: str) -> Optional[Dict]:
         """
@@ -86,32 +105,34 @@ class WebexMeetingsAPI:
         try:
             access_token = await self._get_access_token()
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    f"{self.base_url}/admin/meetings/{meeting_id}",
-                    headers={
-                        "Authorization": f"Bearer {access_token}",
-                        "Content-Type": "application/json"
-                    }
-                )
+            start_time = time.time()
+            client = await self._get_client()
+            response = await client.get(
+                f"{self.base_url}/admin/meetings/{meeting_id}",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+            if response.status_code == 200:
+                meeting_data = response.json()
+                elapsed = time.time() - start_time
+                print(f"✅ Retrieved meeting details from Admin API ({elapsed:.2f}s)")
                 
-                if response.status_code == 200:
-                    meeting_data = response.json()
-                    print(f"✅ Retrieved meeting details from Admin API")
-                    
-                    # Extract relevant fields
-                    return {
-                        "meeting_number": meeting_data.get("meetingNumber"),
-                        "host_email": meeting_data.get("hostEmail"),
-                        "start": meeting_data.get("start"),
-                        "end": meeting_data.get("end"),
-                        "scheduled_type": meeting_data.get("scheduledType"),
-                        "title": meeting_data.get("title"),
-                        "meeting_type": meeting_data.get("meetingType")
-                    }
-                else:
-                    print(f"❌ Get Meeting Admin API error: {response.status_code} - {response.text}")
-                    return None
+                # Extract relevant fields
+                return {
+                    "meeting_number": meeting_data.get("meetingNumber"),
+                    "host_email": meeting_data.get("hostEmail"),
+                    "start": meeting_data.get("start"),
+                    "end": meeting_data.get("end"),
+                    "scheduled_type": meeting_data.get("scheduledType"),
+                    "title": meeting_data.get("title"),
+                    "meeting_type": meeting_data.get("meetingType")
+                }
+            else:
+                print(f"❌ Get Meeting Admin API error: {response.status_code} - {response.text}")
+                return None
                     
         except Exception as e:
             print(f"❌ Failed to get meeting by ID (admin): {str(e)}")
@@ -134,34 +155,36 @@ class WebexMeetingsAPI:
         try:
             access_token = await self._get_access_token()
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    f"{self.base_url}/meetings",
-                    params={
-                        "meetingNumber": meeting_number,
-                        "hostEmail": host_email,
-                        "max": 1  # We only need the first result
-                    },
-                    headers={
-                        "Authorization": f"Bearer {access_token}",
-                        "Content-Type": "application/json"
-                    }
-                )
+            start_time = time.time()
+            client = await self._get_client()
+            response = await client.get(
+                f"{self.base_url}/meetings",
+                params={
+                    "meetingNumber": meeting_number,
+                    "hostEmail": host_email,
+                    "max": 1  # We only need the first result
+                },
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get("items", [])
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    items = data.get("items", [])
-                    
-                    if items:
-                        weblink = items[0].get("webLink")
-                        print(f"✅ Retrieved webLink from List Meetings API")
-                        return weblink
-                    else:
-                        print(f"⚠️ No meeting found for meetingNumber={meeting_number}, hostEmail={host_email}")
-                        return None
+                if items:
+                    weblink = items[0].get("webLink")
+                    elapsed = time.time() - start_time
+                    print(f"✅ Retrieved webLink from List Meetings API ({elapsed:.2f}s)")
+                    return weblink
                 else:
-                    print(f"❌ List Meetings API error: {response.status_code} - {response.text}")
+                    print(f"⚠️ No meeting found for meetingNumber={meeting_number}, hostEmail={host_email}")
                     return None
+            else:
+                print(f"❌ List Meetings API error: {response.status_code} - {response.text}")
+                return None
                     
         except Exception as e:
             print(f"❌ Failed to get meeting weblink: {str(e)}")
@@ -186,50 +209,52 @@ class WebexMeetingsAPI:
         try:
             access_token = await self._get_access_token()
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    f"{self.base_url}/meeting-invitees",
-                    params={
-                        "meetingId": meeting_id,
-                        "hostEmail": host_email,
-                        "max": 100  # Get up to 100 invitees
-                    },
-                    headers={
-                        "Authorization": f"Bearer {access_token}",
-                        "Content-Type": "application/json"
-                    }
-                )
+            start_time = time.time()
+            client = await self._get_client()
+            response = await client.get(
+                f"{self.base_url}/meetingInvitees",
+                params={
+                    "meetingId": meeting_id,
+                    "hostEmail": host_email,
+                    "max": 100  # Get up to 100 invitees
+                },
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                }
+            )
+            elapsed = time.time() - start_time
+            
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get("items", [])
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    items = data.get("items", [])
+                # Separate participants and cohosts
+                participant_emails = []
+                cohost_emails = []
+                
+                for invitee in items:
+                    email = invitee.get("email")
+                    is_cohost = invitee.get("coHost", False)
                     
-                    # Separate participants and cohosts
-                    participant_emails = []
-                    cohost_emails = []
-                    
-                    for invitee in items:
-                        email = invitee.get("email")
-                        is_cohost = invitee.get("coHost", False)
-                        
-                        if email:
-                            if is_cohost:
-                                cohost_emails.append(email)
-                            else:
-                                participant_emails.append(email)
-                    
-                    print(f"✅ Retrieved {len(participant_emails)} participants, {len(cohost_emails)} cohosts")
-                    return {
-                        "participant_emails": participant_emails,
-                        "cohost_emails": cohost_emails
-                    }
-                else:
-                    print(f"⚠️ List Invitees API error: {response.status_code} - {response.text}")
-                    # Don't fail completely - return empty lists
-                    return {
-                        "participant_emails": [],
-                        "cohost_emails": []
-                    }
+                    if email:
+                        if is_cohost:
+                            cohost_emails.append(email)
+                        else:
+                            participant_emails.append(email)
+                
+                print(f"✅ Retrieved {len(participant_emails)} participants, {len(cohost_emails)} cohosts ({elapsed:.2f}s)")
+                return {
+                    "participant_emails": participant_emails,
+                    "cohost_emails": cohost_emails
+                }
+            else:
+                print(f"⚠️ List Invitees API error ({elapsed:.2f}s): {response.status_code} - {response.text}")
+                # Don't fail completely - return empty lists
+                return {
+                    "participant_emails": [],
+                    "cohost_emails": []
+                }
                     
         except Exception as e:
             print(f"⚠️ Failed to get meeting invitees (continuing with empty lists): {str(e)}")
@@ -280,11 +305,14 @@ class WebexMeetingsAPI:
                 raise Exception(f"Missing required fields: meeting_number={meeting_number}, host_email={host_email}")
             
             # Steps 2 & 3: Parallel calls for webLink and invitees
+            parallel_start = time.time()
             print(f"🔄 Fetching webLink and invitees in parallel...")
             weblink_task = self.get_meeting_weblink(meeting_number, host_email)
             invitees_task = self.get_meeting_invitees(meeting_id, host_email)
             
             weblink, invitees = await asyncio.gather(weblink_task, invitees_task)
+            parallel_elapsed = time.time() - parallel_start
+            print(f"✅ Parallel fetch completed ({parallel_elapsed:.2f}s total)")
             
             if not weblink:
                 raise Exception("Failed to retrieve meeting webLink")
@@ -338,36 +366,38 @@ class WebexMeetingsAPI:
             
             # Call List Meetings by Admin API with webLink parameter
             # The API requires either meetingNumber or webLink as a filter
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    f"{self.base_url}/admin/meetings",
-                    params={
-                        "webLink": meeting_link  # Search directly by webLink
-                    },
-                    headers={
-                        "Authorization": f"Bearer {access_token}",
-                        "Content-Type": "application/json"
-                    }
-                )
-                
-                if response.status_code != 200:
-                    error_detail = response.text
-                    print(f"❌ List Meetings API failed: {response.status_code}")
-                    print(f"   Error details: {error_detail}")
-                    return None
-                
-                data = response.json()
-                meetings = data.get("items", [])
-                print(f"📋 Found {len(meetings)} meeting(s) for link")
-                
-                # Should return exactly one meeting
-                if meetings:
-                    meeting_id = meetings[0]["id"]
-                    print(f"✅ Found meeting")
-                    return meeting_id
-                else:
-                    print(f"❌ No meeting found with webLink")
-                    return None
+            start_time = time.time()
+            client = await self._get_client()
+            response = await client.get(
+                f"{self.base_url}/admin/meetings",
+                params={
+                    "webLink": meeting_link  # Search directly by webLink
+                },
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                }
+            )
+            elapsed = time.time() - start_time
+            
+            if response.status_code != 200:
+                error_detail = response.text
+                print(f"❌ List Meetings API failed ({elapsed:.2f}s): {response.status_code}")
+                print(f"   Error details: {error_detail}")
+                return None
+            
+            data = response.json()
+            meetings = data.get("items", [])
+            print(f"📋 Found {len(meetings)} meeting(s) for link ({elapsed:.2f}s)")
+            
+            # Should return exactly one meeting
+            if meetings:
+                meeting_id = meetings[0]["id"]
+                print(f"✅ Found meeting")
+                return meeting_id
+            else:
+                print(f"❌ No meeting found with webLink")
+                return None
                 
         except httpx.TimeoutException:
             print(f"❌ Error finding meeting by link: Request timed out (cold start?)")

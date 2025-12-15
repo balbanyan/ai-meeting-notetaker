@@ -36,10 +36,10 @@ async def process_speaker_mapping_optimized(audio_chunk_id: str):
     Phase 4: WebSocket broadcast (non-blocking)
     
     Total connection hold time: ~100ms (vs 500-1000ms with class-based approach)
-    
-    Args:
-        audio_chunk_id: UUID of the completed audio chunk
-    """
+        
+        Args:
+            audio_chunk_id: UUID of the completed audio chunk
+        """
     
     # Phase 1: Get data from database, then release connection
     db = SessionLocal()
@@ -51,13 +51,13 @@ async def process_speaker_mapping_optimized(audio_chunk_id: str):
         if not chunk:
             logger.error(f"❌ Chunk not found: UUID {audio_chunk_id}")
             return
-            
+                
         # Parse transcript JSON to get words
         transcript_data = _parse_transcript_json(chunk.chunk_transcript)
         if not transcript_data or not transcript_data.get('words'):
             logger.warning(f"⚠️ No word timestamps available for chunk UUID: {audio_chunk_id}")
             return
-            
+                
         # Validate timing data
         if not chunk.audio_started_at or not chunk.audio_ended_at:
             logger.warning(f"⚠️ Missing audio timing for chunk UUID: {audio_chunk_id}")
@@ -90,7 +90,7 @@ async def process_speaker_mapping_optimized(audio_chunk_id: str):
         speaker_events_data,
         audio_started_at
     )
-    
+            
     segments = _group_words_into_segments(word_speaker_mapping)
     
     if not segments:
@@ -190,27 +190,27 @@ async def process_speaker_mapping_optimized(audio_chunk_id: str):
 
 
 def _parse_transcript_json(transcript_str: str) -> Optional[Dict]:
-        """
-        Parse transcript JSON from chunk_transcript column.
-        Handles both new JSON format and old plain text format.
-        
-        Returns:
-            Dict with 'text' and 'words' keys, or None if parsing fails
-        """
-        if not transcript_str:
+    """
+    Parse transcript JSON from chunk_transcript column.
+    Handles both new JSON format and old plain text format.
+    
+    Returns:
+        Dict with 'text' and 'words' keys, or None if parsing fails
+    """
+    if not transcript_str:
+        return None
+    
+    try:
+        # Try to parse as JSON (new format)
+        if transcript_str.strip().startswith('{'):
+            return json.loads(transcript_str)
+        else:
+            # Old format (plain text) - no word timestamps available
+            logger.warning("Old transcript format detected (plain text, no word timestamps)")
             return None
-        
-        try:
-            # Try to parse as JSON (new format)
-            if transcript_str.strip().startswith('{'):
-                return json.loads(transcript_str)
-            else:
-                # Old format (plain text) - no word timestamps available
-                logger.warning("Old transcript format detected (plain text, no word timestamps)")
-                return None
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ Failed to parse transcript JSON: {str(e)}")
-            return None
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ Failed to parse transcript JSON: {str(e)}")
+        return None
     
 
 def _map_words_to_speakers(
