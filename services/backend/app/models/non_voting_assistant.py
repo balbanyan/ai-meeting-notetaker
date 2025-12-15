@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Integer, DateTime, func, ForeignKey, JSON
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.types import Uuid
 from sqlalchemy.orm import relationship
 import uuid
 from app.core.database import Base
@@ -8,8 +8,8 @@ from app.core.database import Base
 class NonVotingAssistantResponse(Base):
     __tablename__ = "non_voting_assistant_responses"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    meeting_id = Column(UUID(as_uuid=True), ForeignKey('meetings.id'), nullable=False, index=True)
+    id = Column(Uuid(), primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(Uuid(), ForeignKey('meetings.id'), nullable=False, index=True)
     triggered_at_chunk_id = Column(Integer, nullable=False)
     
     # Input summary

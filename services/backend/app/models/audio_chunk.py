@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, LargeBinary, Boolean, DateTime, Integer, func, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.types import Uuid
 from sqlalchemy.orm import relationship
 import uuid
 from app.core.database import Base
@@ -8,8 +8,8 @@ from app.core.database import Base
 class AudioChunk(Base):
     __tablename__ = "audio_chunks"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)  # UUID primary key
-    meeting_id = Column(UUID(as_uuid=True), ForeignKey('meetings.id'), nullable=False, index=True)  # Foreign key to meetings table
+    id = Column(Uuid(), primary_key=True, default=uuid.uuid4)  # UUID primary key
+    meeting_id = Column(Uuid(), ForeignKey('meetings.id'), nullable=False, index=True)  # Foreign key to meetings table
     chunk_id = Column(Integer, nullable=False, index=True)         # Sequential chunk number per meeting  
     chunk_audio = Column(LargeBinary, nullable=True)               # Binary audio data
     chunk_transcript = Column(String, nullable=True)               # Transcript text

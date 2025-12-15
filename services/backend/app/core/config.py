@@ -3,6 +3,9 @@ from typing import Optional
 
 
 class Settings(BaseSettings):
+    # Database URL - supports both PostgreSQL and SQL Server
+    # PostgreSQL: postgresql://user:pass@host:5432/dbname
+    # SQL Server: mssql+pyodbc://user:pass@host:1433/dbname?driver=ODBC+Driver+17+for+SQL+Server
     database_url: str = "postgresql://postgres:postgres@127.0.0.1:5432/ai_notetaker"
     bot_service_token: str = "dev-bot-token-12345"
     bot_runner_url: str = "http://localhost:3001"

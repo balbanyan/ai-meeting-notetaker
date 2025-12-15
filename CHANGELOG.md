@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.2.0] - 2025-12-15
+
+### Added
+- **Multi-Database Support**: Added support for both PostgreSQL and SQL Server
+  - Database type is automatically detected from connection URL
+  - PostgreSQL: `postgresql://...` or `postgresql+psycopg2://...`
+  - SQL Server: `mssql+pyodbc://...` or `mssql+pymssql://...`
+  - Added `pyodbc>=5.0.0` driver dependency for SQL Server support
+
+### Changed
+- **Database-Agnostic Types**: Replaced PostgreSQL-specific types with database-agnostic alternatives
+  - Replaced `UUID` (PostgreSQL-specific) with `Uuid` from `sqlalchemy.types` (works with both PostgreSQL and SQL Server)
+  - Replaced `ARRAY` type with `JSON` for `cohost_emails` field (both databases support JSON natively)
+  - Updated all 6 model files to use cross-database compatible types
+  - Updated error handling in `database.py` to support both PostgreSQL and SQL Server error patterns
+
+### Technical Details
+- All UUID primary keys now use SQLAlchemy's `Uuid` type from `sqlalchemy.types`
+- `cohost_emails` field now stores arrays as JSON (was PostgreSQL ARRAY)
+- No changes needed to service code - SQLAlchemy handles type conversion transparently
+- Existing PostgreSQL databases continue to work without migration
+
+---
+
 ## [2.1.0] - 2025-12-14
 
 ### Added

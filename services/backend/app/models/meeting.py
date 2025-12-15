@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Boolean, DateTime, func, JSON, Text, Integer, Index
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy.types import Uuid
 from sqlalchemy.orm import relationship
 import uuid
 from app.core.database import Base
@@ -9,7 +9,7 @@ class Meeting(Base):
     __tablename__ = "meetings"
     
     # Primary Key - Internal unique identifier
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(Uuid(), primary_key=True, default=uuid.uuid4)
     
     # Webex Identifiers
     # webex_meeting_id: Unique per session. For personal rooms, includes timestamp suffix (e.g., "abc123_20251211T163000Z")
@@ -21,7 +21,7 @@ class Meeting(Base):
     # Meeting Details from List Meetings API
     host_email = Column(String(255), nullable=True, index=True)
     participant_emails = Column(JSON, nullable=True)  # List of participant emails (non-cohosts only)
-    cohost_emails = Column(ARRAY(String), default=list)  # List of cohost emails (separate from participants)
+    cohost_emails = Column(JSON, default=list)  # List of cohost emails (separate from participants)
     scheduled_start_time = Column(DateTime(timezone=True), nullable=True, index=True)
     scheduled_end_time = Column(DateTime(timezone=True), nullable=True)
     

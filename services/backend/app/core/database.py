@@ -51,9 +51,12 @@ def create_tables():
         print("✅ Database tables created/verified")
     except Exception as e:
         error_msg = str(e).lower()
-        # Ignore "already exists" errors from concurrent startups
+        # Ignore "already exists" errors from concurrent startups (database-agnostic)
         # This happens when multiple Cloud Run instances start simultaneously
-        if "already exists" in error_msg or "duplicate key" in error_msg:
+        # PostgreSQL: "already exists", "duplicate key"
+        # SQL Server: "already an object named", "violation of primary key"
+        if ("already exists" in error_msg or "duplicate key" in error_msg or
+            "already an object named" in error_msg or "violation of primary key" in error_msg):
             print(f"⚠️  Database objects already exist (concurrent startup or restart) - continuing...")
         else:
             # Re-raise other errors (connection issues, permissions, etc.)
@@ -83,9 +86,12 @@ def reset_database():
         print("✅ Tables created")
     except Exception as e:
         error_msg = str(e).lower()
-        # Ignore "already exists" errors from concurrent startups
+        # Ignore "already exists" errors from concurrent startups (database-agnostic)
         # This happens when multiple Cloud Run instances reset simultaneously
-        if "already exists" in error_msg or "duplicate key" in error_msg:
+        # PostgreSQL: "already exists", "duplicate key"
+        # SQL Server: "already an object named", "violation of primary key"
+        if ("already exists" in error_msg or "duplicate key" in error_msg or
+            "already an object named" in error_msg or "violation of primary key" in error_msg):
             print(f"⚠️  Database objects already exist (another instance created them) - continuing...")
         else:
             # Re-raise other errors (connection issues, permissions, etc.)

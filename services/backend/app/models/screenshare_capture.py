@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, LargeBinary, Text, DateTime, Integer, func, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.types import Uuid
 from sqlalchemy.orm import relationship
 import uuid
 from app.core.database import Base
@@ -8,9 +8,9 @@ from app.core.database import Base
 class ScreenshareCapture(Base):
     __tablename__ = "screenshare_captures"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    meeting_id = Column(UUID(as_uuid=True), ForeignKey('meetings.id'), nullable=False, index=True)
-    audio_chunk_id = Column(UUID(as_uuid=True), ForeignKey('audio_chunks.id'), nullable=False, index=True)
+    id = Column(Uuid(), primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(Uuid(), ForeignKey('meetings.id'), nullable=False, index=True)
+    audio_chunk_id = Column(Uuid(), ForeignKey('audio_chunks.id'), nullable=False, index=True)
     chunk_id = Column(Integer, nullable=False, index=True)  # Sequential reference, same as audio chunk
     
     # Screenshot data
