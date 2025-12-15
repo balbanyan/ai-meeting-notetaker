@@ -98,6 +98,7 @@ class GetTranscriptsResponse(BaseModel):
 class MeetingListItem(BaseModel):
     meeting_uuid: str
     webex_meeting_id: str
+    original_webex_meeting_id: Optional[str]
     meeting_number: Optional[str]
     meeting_title: Optional[str]
     host_email: Optional[str]
@@ -107,6 +108,8 @@ class MeetingListItem(BaseModel):
     scheduled_end_time: Optional[datetime]
     actual_join_time: Optional[datetime]
     actual_leave_time: Optional[datetime]
+    meeting_type: Optional[str]
+    scheduled_type: Optional[str]
     meeting_summary: Optional[str]
     is_active: bool  # Include is_active status for frontend
     
@@ -130,9 +133,15 @@ class MeetingDetailsTranscript(BaseModel):
         from_attributes = True
 
 
+class MeetingStatusResponse(BaseModel):
+    """Simple response for meeting status check by Webex meeting ID"""
+    is_active: bool
+
+
 class MeetingDetailsResponse(BaseModel):
     meeting_uuid: str
     webex_meeting_id: str
+    original_webex_meeting_id: Optional[str]
     meeting_number: Optional[str]
     meeting_title: Optional[str]
     meeting_link: str
@@ -144,6 +153,7 @@ class MeetingDetailsResponse(BaseModel):
     actual_join_time: Optional[datetime]
     actual_leave_time: Optional[datetime]
     meeting_type: Optional[str]
+    scheduled_type: Optional[str]
     meeting_summary: Optional[str]
     is_active: bool  # Include is_active for live meeting detection
     transcripts: List[MeetingDetailsTranscript]

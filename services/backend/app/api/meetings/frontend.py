@@ -10,6 +10,7 @@ from .schemas import (
     MeetingsListResponse,
     MeetingDetailsTranscript,
     MeetingDetailsResponse,
+    MeetingStatusResponse,
 )
 
 router = APIRouter()
@@ -58,6 +59,7 @@ async def list_meetings(db: Session = Depends(get_db)):
             item = MeetingListItem(
                 meeting_uuid=str(meeting.id),
                 webex_meeting_id=meeting.webex_meeting_id,
+                original_webex_meeting_id=meeting.original_webex_meeting_id,
                 meeting_number=meeting.meeting_number,
                 meeting_title=meeting.meeting_title,
                 host_email=meeting.host_email,
@@ -67,6 +69,8 @@ async def list_meetings(db: Session = Depends(get_db)):
                 scheduled_end_time=meeting.scheduled_end_time,
                 actual_join_time=meeting.actual_join_time,
                 actual_leave_time=meeting.actual_leave_time,
+                meeting_type=meeting.meeting_type,
+                scheduled_type=meeting.scheduled_type,
                 meeting_summary=meeting.meeting_summary,
                 is_active=meeting.is_active
             )
@@ -87,12 +91,58 @@ async def list_meetings(db: Session = Depends(get_db)):
         )
 
 
+@router.get("/meetings/status/{meeting_identifier}", response_model=MeetingStatusResponse)
+async def get_meeting_status(meeting_identifier: str, db: Session = Depends(get_db)):
+    """
+    Check if a bot is active for a meeting.
+    
+    Accepts either:
+    - UUID: Checks the specific meeting by internal UUID
+    - Webex meeting ID: Checks original_webex_meeting_id (matches embedded app meeting ID)
+    
+    Returns simple status response with is_active boolean.
+    No authentication required - matches embedded app pattern.
+    """
+    try:
+        print(f"🔍 GET MEETING STATUS: {meeting_identifier}")
+        
+        # Try to parse as UUID first
+        try:
+            uuid_obj = uuid.UUID(meeting_identifier)
+            # Find meeting by UUID and check if active
+            meeting = db.query(Meeting).filter(
+                Meeting.id == uuid_obj,
+                Meeting.is_active == True
+            ).first()
+            is_active = meeting is not None
+        except ValueError:
+            # Not a UUID - treat as Webex meeting ID and check original_webex_meeting_id
+            # Check if any active meetings exist with this original_webex_meeting_id
+            active_meeting = db.query(Meeting).filter(
+                Meeting.original_webex_meeting_id == meeting_identifier,
+                Meeting.is_active == True
+            ).first()
+            is_active = active_meeting is not None
+        
+        print(f"✅ Meeting status: {'active' if is_active else 'inactive'}")
+        return MeetingStatusResponse(is_active=is_active)
+    
+    except Exception as e:
+        print(f"❌ GET MEETING STATUS FAILED - {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve meeting status: {str(e)}"
+        )
+
+
 @router.get("/meetings/{meeting_uuid}", response_model=MeetingDetailsResponse)
 async def get_meeting_details(meeting_uuid: str, db: Session = Depends(get_db)):
     """
     Get detailed meeting information including transcripts for a specific meeting.
     
-    Returns full meeting data plus all speaker transcripts ordered chronologically.
+    Accepts UUID only. Returns full meeting data plus all speaker transcripts ordered chronologically.
     No authentication required - matches embedded app pattern.
     """
     try:
@@ -134,6 +184,7 @@ async def get_meeting_details(meeting_uuid: str, db: Session = Depends(get_db)):
         return MeetingDetailsResponse(
             meeting_uuid=str(meeting.id),
             webex_meeting_id=meeting.webex_meeting_id,
+            original_webex_meeting_id=meeting.original_webex_meeting_id,
             meeting_number=meeting.meeting_number,
             meeting_title=meeting.meeting_title,
             meeting_link=meeting.meeting_link,
@@ -145,6 +196,7 @@ async def get_meeting_details(meeting_uuid: str, db: Session = Depends(get_db)):
             actual_join_time=meeting.actual_join_time,
             actual_leave_time=meeting.actual_leave_time,
             meeting_type=meeting.meeting_type,
+            scheduled_type=meeting.scheduled_type,
             meeting_summary=meeting.meeting_summary,
             is_active=meeting.is_active,
             transcripts=transcript_items

@@ -99,7 +99,9 @@ class WebexMeetingsAPI:
                 "host_email": str,
                 "start": str (ISO 8601),
                 "end": str (ISO 8601),
-                "scheduled_type": str  # "meeting", "webinar", "personalRoomMeeting"
+                "scheduled_type": str,  # "meeting", "webinar", "personalRoomMeeting"
+                "meeting_type": str,  # "meeting", "webinar", "personalRoomMeeting", "scheduledMeeting"
+                "meeting_series_id": str  # Original meeting ID for scheduled meetings (meetingSeriesId)
             }
         """
         try:
@@ -109,6 +111,9 @@ class WebexMeetingsAPI:
             client = await self._get_client()
             response = await client.get(
                 f"{self.base_url}/admin/meetings/{meeting_id}",
+                params={
+                    "current": "true"  # Get current instance for scheduled meetings
+                },
                 headers={
                     "Authorization": f"Bearer {access_token}",
                     "Content-Type": "application/json"
@@ -122,13 +127,15 @@ class WebexMeetingsAPI:
                 
                 # Extract relevant fields
                 return {
+                    "meeting_id": meeting_data.get("id"),  # Actual meeting ID (may include timestamp for scheduled meetings)
                     "meeting_number": meeting_data.get("meetingNumber"),
                     "host_email": meeting_data.get("hostEmail"),
                     "start": meeting_data.get("start"),
                     "end": meeting_data.get("end"),
                     "scheduled_type": meeting_data.get("scheduledType"),
                     "title": meeting_data.get("title"),
-                    "meeting_type": meeting_data.get("meetingType")
+                    "meeting_type": meeting_data.get("meetingType"),
+                    "meeting_series_id": meeting_data.get("meetingSeriesId")
                 }
             else:
                 print(f"❌ Get Meeting Admin API error: {response.status_code} - {response.text}")
@@ -162,6 +169,7 @@ class WebexMeetingsAPI:
                 params={
                     "meetingNumber": meeting_number,
                     "hostEmail": host_email,
+                    "current": "true",  # Get current instance for scheduled meetings
                     "max": 1  # We only need the first result
                 },
                 headers={
@@ -285,8 +293,10 @@ class WebexMeetingsAPI:
                 "scheduled_type": str,
                 "meeting_link": str,
                 "participant_emails": List[str],
+                "cohost_emails": List[str],
                 "title": str,
-                "meeting_type": str
+                "meeting_type": str,
+                "meeting_series_id": str  # Original meeting ID for scheduled meetings (meetingSeriesId)
             }
         """
         try:
@@ -318,8 +328,10 @@ class WebexMeetingsAPI:
                 raise Exception("Failed to retrieve meeting webLink")
             
             # Return combined data
+            # Use meeting_id from API response (has timestamp for scheduled meetings) or fallback to input
+            api_meeting_id = admin_data.get("meeting_id") or meeting_id
             result = {
-                "webex_meeting_id": meeting_id,
+                "webex_meeting_id": api_meeting_id,  # Actual meeting ID from API (may include timestamp for scheduled meetings)
                 "meeting_number": meeting_number,
                 "host_email": host_email,
                 "scheduled_start_time": admin_data.get("start"),
@@ -329,7 +341,8 @@ class WebexMeetingsAPI:
                 "cohost_emails": invitees.get("cohost_emails", []),
                 "title": admin_data.get("title"),
                 "scheduled_type": admin_data.get("scheduled_type"),  # "meeting", "webinar", "personalRoomMeeting"
-                "meeting_type": admin_data.get("meeting_type")  # Keep for backwards compat
+                "meeting_type": admin_data.get("meeting_type"),  # "meeting", "webinar", "personalRoomMeeting", "scheduledMeeting"
+                "meeting_series_id": admin_data.get("meeting_series_id")  # Original meeting ID for scheduled meetings
             }
             
             print(f"✅ Complete meeting data retrieved successfully")
@@ -371,7 +384,8 @@ class WebexMeetingsAPI:
             response = await client.get(
                 f"{self.base_url}/admin/meetings",
                 params={
-                    "webLink": meeting_link  # Search directly by webLink
+                    "webLink": meeting_link,  # Search directly by webLink
+                    "current": "true"  # Get current instance for scheduled meetings
                 },
                 headers={
                     "Authorization": f"Bearer {access_token}",

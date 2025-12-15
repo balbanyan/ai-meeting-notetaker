@@ -137,8 +137,10 @@ cd ../frontend
 cp .env.example .env
 
 # Edit .env with your settings:
-VITE_BACKEND_URL=http://localhost:8080
 VITE_DEV_MODE=false  # Set to 'true' for local testing without Webex SDK
+
+# Note: VITE_BACKEND_URL is no longer needed - frontend uses relative URLs
+# Nginx handles routing to backend automatically
 ```
 
 **Bot-Runner Environment:**
@@ -231,7 +233,7 @@ open http://localhost:5173
 **Option 2: Testing Endpoint**
 ```bash
 # Test bot join without Webex API calls
-curl -X POST http://localhost:8080/meetings/test-join \
+curl -X POST http://localhost:8080/api/meetings/test-join \
   -H "Content-Type: application/json" \
   -d '{"meeting_url": "https://meet.webex.com/meet/your-meeting"}'
 ```
@@ -239,14 +241,17 @@ curl -X POST http://localhost:8080/meetings/test-join \
 ### API Endpoints
 
 **Backend (Port 8080):**
-- `GET /health` - Health check
-- `POST /meetings/register-and-join` - Register meeting and trigger bot (production)
-- `POST /meetings/test-join` - Test bot join without API calls (development)
-- `PATCH /meetings/{uuid}/status` - Update meeting status
-- `POST /audio/chunk` - Submit audio chunks from bot
-- `GET /audio/chunks/{meeting_uuid}` - Get all chunks for meeting
-- `GET /audio/chunks/{meeting_uuid}/count` - Get chunk count
-- `POST /events/speaker-started` - Log speaker event
+- `GET /health` - Health check (at root, no /api prefix)
+- `GET /metrics` - Prometheus metrics (at root, no /api prefix)
+- `POST /api/meetings/register-and-join` - Register meeting and trigger bot (production)
+- `POST /api/meetings/test-join` - Test bot join without API calls (development)
+- `PATCH /api/meetings/{uuid}/status` - Update meeting status
+- `POST /api/audio/chunk` - Submit audio chunks from bot
+- `GET /api/audio/chunks/{meeting_uuid}` - Get all chunks for meeting
+- `GET /api/audio/chunks/count` - Get chunk count
+- `POST /api/events/speaker-started` - Log speaker event
+- `POST /api/screenshots/capture` - Submit screenshot from bot
+- `WS /ws/meeting/{meeting_id}` - WebSocket for real-time updates (no /api prefix)
 
 **Bot Runner (Port 3001, started on-demand):**
 - `POST /join` - Join a meeting (triggered by backend)
@@ -323,8 +328,10 @@ VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 
 **Frontend (.env):**
 ```bash
-VITE_BACKEND_URL=http://localhost:8080
-VITE_DEV_MODE=false  # Set to 'true' for local testing
+VITE_DEV_MODE=false  # Set to 'true' for local testing without Webex SDK
+
+# Note: VITE_BACKEND_URL is no longer needed - frontend uses relative URLs
+# Nginx handles routing to backend automatically
 ```
 
 **Bot-Runner (.env):**

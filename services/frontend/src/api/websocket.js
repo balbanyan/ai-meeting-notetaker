@@ -1,7 +1,12 @@
 // WebSocket client for real-time meeting updates
+// Uses relative URLs - nginx handles routing to backend
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080'
-const WS_URL = BACKEND_URL.replace('http://', 'ws://').replace('https://', 'wss://')
+// Determine WebSocket protocol based on current page protocol
+const getWebSocketUrl = (path) => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.host
+  return `${protocol}//${host}${path}`
+}
 
 /**
  * WebSocket manager for real-time meeting updates.
@@ -38,7 +43,7 @@ export class MeetingWebSocket {
     }
     
     try {
-      const url = `${WS_URL}/ws/meeting/${this.meetingId}`
+      const url = getWebSocketUrl(`/ws/meeting/${this.meetingId}`)
       console.log(`🔌 Connecting to WebSocket: ${url}`)
       
       this.ws = new WebSocket(url)

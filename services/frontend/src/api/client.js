@@ -1,11 +1,5 @@
 // API client for backend communication
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080'
-
-// Log backend URL on module load
-console.log('🔧 API Client Configuration:')
-console.log('  Backend URL:', BACKEND_URL)
-console.log('  Environment:', import.meta.env.MODE || 'development')
+// Uses relative URLs - nginx handles routing to backend
 
 // Logging utility for API calls
 const logger = {
@@ -44,7 +38,8 @@ const logger = {
 
 // Helper function to make API calls with logging
 async function apiCall(method, endpoint, body = null) {
-  const url = `${BACKEND_URL}${endpoint}`
+  // Use relative URL - nginx will proxy to backend
+  const url = endpoint
   const startTime = performance.now()
   
   try {
@@ -124,12 +119,12 @@ export async function fetchMeetingDetails(meetingUuid) {
 
 /**
  * Get current meeting status (for checking if bot is active)
- * @param {string} meetingId - Webex meeting ID
+ * @param {string} meetingId - Webex meeting ID (original_webex_meeting_id)
  * @returns {Promise<Object>} Object with is_active boolean
  */
 export async function getMeetingStatus(meetingId) {
   try {
-    const data = await apiCall('GET', `/api/meetings/${meetingId}`)
+    const data = await apiCall('GET', `/api/meetings/status/${meetingId}`)
     return { is_active: data.is_active || false }
   } catch (error) {
     // If meeting doesn't exist yet (404), treat as inactive

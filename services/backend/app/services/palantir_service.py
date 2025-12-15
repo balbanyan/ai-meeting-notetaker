@@ -398,7 +398,7 @@ class PalantirService:
                 "new_slides": [
                     {
                         "screenshot_id": s['id'],
-                        "screenshot_url": f"/screenshots/image/{s['id']}",
+                        "screenshot_url": f"/api/screenshots/image/{s['id']}",
                         "analysis": s['vision_analysis'],
                         "captured_at": s['captured_at'].isoformat()
                     }

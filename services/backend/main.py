@@ -58,11 +58,14 @@ app.add_middleware(
 )
 
 # Include routers
+# Health endpoints stay at root (best practice for load balancers)
 app.include_router(health_router, tags=["Health"])
-app.include_router(meetings_router, tags=["Meetings"])
-app.include_router(audio_router, tags=["Audio"])
-app.include_router(speaker_events_router, tags=["Speaker Events"])
-app.include_router(screenshots_router, tags=["Screenshots"])
+# All API endpoints use /api prefix for consistency
+app.include_router(meetings_router, prefix="/api", tags=["Meetings"])
+app.include_router(audio_router, prefix="/api", tags=["Audio"])
+app.include_router(speaker_events_router, prefix="/api", tags=["Speaker Events"])
+app.include_router(screenshots_router, prefix="/api", tags=["Screenshots"])
+# WebSocket endpoints stay at /ws (no /api prefix)
 app.include_router(websocket_router, tags=["WebSocket"])
 
 

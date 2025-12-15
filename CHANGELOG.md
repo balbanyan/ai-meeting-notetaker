@@ -6,6 +6,101 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.4.0] - 2025-12-18
+
+### Added
+- **Database Schema: New Columns for Meeting Identification**
+  - Added `original_webex_meeting_id` column: Stores the original Webex meeting ID without timestamp
+    - For scheduled meetings: Uses `meetingSeriesId` from Webex API
+    - For regular meetings and personal rooms: Uses the meeting ID from embedded app (before timestamp)
+  - Added `scheduled_type` column: Stores `scheduledType` from Webex API separately
+    - Values: `"meeting"`, `"webinar"`, `"personalRoomMeeting"`
+    - Used for personal room detection logic
+
+- **New Status Endpoint**: `/api/meetings/status/{meeting_identifier}`
+  - Lightweight endpoint to check if a bot is active for a meeting
+  - Accepts both UUID and Webex meeting ID (original_webex_meeting_id)
+  - Returns simple response: `{ is_active: true/false }`
+  - More efficient than full meeting details endpoint for status checks
+
+### Changed
+- **Meeting Type Source**: `meeting_type` column now uses `meetingType` instead of `scheduledType`
+  - Previously stored: `"meeting"`, `"webinar"`, `"personalRoomMeeting"` (from `scheduledType`)
+  - Now stores: `"meeting"`, `"webinar"`, `"personalRoomMeeting"`, `"scheduledMeeting"` (from `meetingType`)
+  - Allows distinguishing between meeting series and individual meetings
+
+- **Webex API: Scheduled Meeting Support**
+  - Added `current=true` parameter to all Webex Admin API calls
+    - `GET /admin/meetings/{meetingId}` - Returns current instance ID with timestamp for scheduled meetings
+    - `GET /meetings` (List Meetings) - Returns current instance for scheduled meetings
+    - `GET /admin/meetings` (List by Admin) - Returns current instance for scheduled meetings
+  - Extracts `meetingSeriesId` from API responses for scheduled meetings
+  - Meeting ID from API response (with timestamp) now used for `webex_meeting_id` storage
+
+- **Meeting Join Logic: Original Webex ID Storage**
+  - For scheduled meetings (`meetingType == "scheduledMeeting"`):
+    - `webex_meeting_id` = API response `id` (with timestamp, e.g., `abc123_20251218T163000Z`)
+    - `original_webex_meeting_id` = `meetingSeriesId` (original series ID)
+  - For regular meetings and personal rooms:
+    - `webex_meeting_id` = API response `id` or `request.meeting_id`
+    - `original_webex_meeting_id` = `request.meeting_id` (before timestamp for personal rooms)
+
+- **Embedded App: Status Check Using Original Webex ID**
+  - Status check now uses `original_webex_meeting_id` to determine if bot is active
+  - Matches the meeting ID from embedded app for all meeting types
+  - Button automatically disables when bot is active
+  - Uses new lightweight `/api/meetings/status/{meetingId}` endpoint
+
+### Technical Details
+- `original_webex_meeting_id` is indexed for fast lookups
+- Allows duplicate values (multiple instances of same scheduled meeting series)
+- Status endpoint queries: `WHERE original_webex_meeting_id = ? AND is_active = true`
+- All meeting types now correctly store and match their original Webex meeting IDs
+
+---
+
+## [2.3.0] - 2025-12-16
+
+### Changed
+- **Frontend Simplification**: Removed all pages except EmbeddedApp
+  - Deleted `HomePage.jsx`, `MeetingDetailsPage.jsx`, and `MeetingCard.jsx` components
+  - Removed React Router - `App.jsx` now directly renders `EmbeddedApp`
+  - Removed `react-router-dom` dependency
+  - Deleted unused CSS files for removed pages
+
+- **API Routing with `/api` Prefix**: All API endpoints now use consistent `/api` prefix
+  - Backend routes updated: `meetings`, `audio`, `screenshots`, `speaker_events` routers now include `/api` prefix
+  - Health endpoints remain at root (`/health`, `/metrics`) - best practice for load balancers
+  - WebSocket endpoints remain at `/ws` (no `/api` prefix)
+  - Bot-runner API calls updated to use `/api` prefix for all endpoints
+  - Screenshot URLs in WebSocket messages updated to `/api/screenshots/image/{id}`
+
+- **Nginx Configuration**: Added path-based routing for same-VM deployment
+  - Nginx listens on port 80 (Docker maps VM:8080 → nginx:80)
+  - `/health*` and `/metrics` → proxy directly to backend
+  - `/api/*` → proxy to backend (backend routes include `/api`)
+  - `/ws/*` → proxy to backend with WebSocket upgrade headers
+  - `/*` → serve frontend static files
+
+- **Frontend API Client**: Switched to relative URLs
+  - Removed `VITE_BACKEND_URL` requirement - frontend now uses relative URLs
+  - API calls use `/api/*` paths, nginx handles routing
+  - WebSocket connections use relative URLs with protocol detection
+  - Frontend Dockerfile no longer requires `VITE_BACKEND_URL` build arg
+
+### Removed
+- **Frontend Pages**: Removed HomePage and MeetingDetailsPage (only EmbeddedApp remains)
+- **React Router**: Removed routing infrastructure (no longer needed)
+- **Environment Variable**: `VITE_BACKEND_URL` no longer required in frontend `.env`
+
+### Technical Details
+- All API endpoints are now consistent: `/api/meetings/...`, `/api/audio/...`, etc.
+- Direct backend calls (Postman, localhost) also require `/api` prefix
+- Frontend `.env` now only needs `VITE_DEV_MODE` (optional)
+- Nginx handles all routing - simpler deployment configuration
+
+---
+
 ## [2.2.0] - 2025-12-15
 
 ### Added

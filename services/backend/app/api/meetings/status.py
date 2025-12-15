@@ -112,7 +112,8 @@ async def test_join_meeting(
                 cohost_emails=[],
                 actual_join_time=datetime.utcnow(),
                 is_active=True,
-                meeting_type="test"
+                meeting_type="meeting",
+                scheduled_type="meeting"
             )
             
             db.add(new_meeting)

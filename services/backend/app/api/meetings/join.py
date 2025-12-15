@@ -95,6 +95,15 @@ async def register_and_join_meeting(
         participant_emails = meeting_data.get("participant_emails", [])
         cohost_emails = meeting_data.get("cohost_emails", [])
         scheduled_type = meeting_data.get("scheduled_type")  # "meeting", "webinar", "personalRoomMeeting"
+        meeting_type = meeting_data.get("meeting_type")  # "meeting", "webinar", "personalRoomMeeting", "scheduledMeeting"
+        meeting_series_id = meeting_data.get("meeting_series_id")  # Original meeting ID for scheduled meetings
+        api_meeting_id = meeting_data.get("webex_meeting_id") or request.meeting_id  # Use API response ID (has timestamp for scheduled meetings) or fallback
+        
+        # Determine original_webex_meeting_id
+        if meeting_type == "scheduledMeeting" and meeting_series_id:
+            original_webex_meeting_id = meeting_series_id
+        else:
+            original_webex_meeting_id = request.meeting_id
         
         # Save original Webex ID for WebSocket broadcasts (before any modification)
         original_webex_id = request.meeting_id
@@ -119,11 +128,12 @@ async def register_and_join_meeting(
                     detail=f"Bot is already active in this personal room (Meeting UUID: {meeting_uuid})"
                 )
         else:
-            stored_webex_id = request.meeting_id
+            # For scheduled meetings, use API meeting ID (has timestamp); for regular meetings, use request.meeting_id
+            stored_webex_id = api_meeting_id
             
             # Check if meeting already exists for non-personal rooms
             existing_meeting = db.query(Meeting).filter(
-                Meeting.webex_meeting_id == request.meeting_id
+                Meeting.webex_meeting_id == api_meeting_id
             ).first()
             
             if existing_meeting and existing_meeting.is_active:
@@ -136,7 +146,7 @@ async def register_and_join_meeting(
         
         # For non-personal rooms, check if meeting exists (for update logic)
         existing_meeting = None if is_personal_room else db.query(Meeting).filter(
-            Meeting.webex_meeting_id == request.meeting_id
+            Meeting.webex_meeting_id == api_meeting_id
         ).first()
         
         # Parse datetime strings
@@ -177,9 +187,12 @@ async def register_and_join_meeting(
             if scheduled_end:
                 existing_meeting.scheduled_end_time = scheduled_end
             
-            # Use scheduled_type for meeting_type (more accurate than meetingType)
+            # Update meeting classification fields
+            if meeting_type:
+                existing_meeting.meeting_type = meeting_type
             if scheduled_type:
-                existing_meeting.meeting_type = scheduled_type
+                existing_meeting.scheduled_type = scheduled_type
+            existing_meeting.original_webex_meeting_id = original_webex_meeting_id
             
             # Non-voting and screenshot settings (API parameters override .env if provided)
             existing_meeting.screenshots_enabled = settings.enable_screenshots
@@ -203,6 +216,7 @@ async def register_and_join_meeting(
             
             new_meeting = Meeting(
                 webex_meeting_id=stored_webex_id,  # Timestamped for personal rooms
+                original_webex_meeting_id=original_webex_meeting_id,
                 meeting_number=meeting_number,
                 meeting_link=meeting_link,
                 meeting_title=meeting_title,
@@ -213,7 +227,8 @@ async def register_and_join_meeting(
                 scheduled_end_time=scheduled_end,
                 actual_join_time=datetime.utcnow(),
                 is_active=True,
-                meeting_type=scheduled_type or "meeting",  # Use scheduled_type (more accurate)
+                meeting_type=meeting_type or "meeting",  # Use meetingType from API
+                scheduled_type=scheduled_type,  # Store scheduledType separately
                 # Non-voting and screenshot settings (API parameters override .env if provided)
                 screenshots_enabled=settings.enable_screenshots,
                 non_voting_enabled=request.enable_non_voting if request.enable_non_voting is not None else settings.enable_non_voting,
@@ -371,6 +386,15 @@ async def register_and_join_meeting_with_link(
         participant_emails = meeting_data.get("participant_emails", [])
         cohost_emails = meeting_data.get("cohost_emails", [])
         scheduled_type = meeting_data.get("scheduled_type")  # "meeting", "webinar", "personalRoomMeeting"
+        meeting_type = meeting_data.get("meeting_type")  # "meeting", "webinar", "personalRoomMeeting", "scheduledMeeting"
+        meeting_series_id = meeting_data.get("meeting_series_id")  # Original meeting ID for scheduled meetings
+        api_meeting_id = meeting_data.get("webex_meeting_id") or webex_meeting_id  # Use API response ID (has timestamp for scheduled meetings) or fallback
+        
+        # Determine original_webex_meeting_id
+        if meeting_type == "scheduledMeeting" and meeting_series_id:
+            original_webex_meeting_id = meeting_series_id
+        else:
+            original_webex_meeting_id = webex_meeting_id
         
         # Save original Webex ID for WebSocket broadcasts (before any modification)
         original_webex_id = webex_meeting_id
@@ -395,11 +419,12 @@ async def register_and_join_meeting_with_link(
                     detail=f"Bot is already active in this personal room (Meeting UUID: {meeting_uuid})"
                 )
         else:
-            stored_webex_id = webex_meeting_id
+            # For scheduled meetings, use API meeting ID (has timestamp); for regular meetings, use webex_meeting_id
+            stored_webex_id = api_meeting_id
             
             # Check if meeting already exists for non-personal rooms
             existing_meeting = db.query(Meeting).filter(
-                Meeting.webex_meeting_id == webex_meeting_id
+                Meeting.webex_meeting_id == api_meeting_id
             ).first()
             
             if existing_meeting and existing_meeting.is_active:
@@ -412,7 +437,7 @@ async def register_and_join_meeting_with_link(
         
         # For non-personal rooms, check if meeting exists (for update logic)
         existing_meeting = None if is_personal_room else db.query(Meeting).filter(
-            Meeting.webex_meeting_id == webex_meeting_id
+            Meeting.webex_meeting_id == api_meeting_id
         ).first()
         
         # Parse datetime strings
@@ -443,7 +468,12 @@ async def register_and_join_meeting_with_link(
             existing_meeting.cohost_emails = cohost_emails
             existing_meeting.scheduled_start_time = scheduled_start
             existing_meeting.scheduled_end_time = scheduled_end
-            existing_meeting.meeting_type = scheduled_type  # Use scheduled_type (more accurate)
+            # Update meeting classification fields
+            if meeting_type:
+                existing_meeting.meeting_type = meeting_type
+            if scheduled_type:
+                existing_meeting.scheduled_type = scheduled_type
+            existing_meeting.original_webex_meeting_id = original_webex_meeting_id
             existing_meeting.screenshots_enabled = settings.enable_screenshots  # Use .env setting
             # API parameters override .env if provided, otherwise use .env
             existing_meeting.non_voting_enabled = request.enable_non_voting if request.enable_non_voting is not None else settings.enable_non_voting
@@ -460,6 +490,7 @@ async def register_and_join_meeting_with_link(
             print(f"✨ Creating new meeting record" + (" (personal room session)" if is_personal_room else ""))
             new_meeting = Meeting(
                 webex_meeting_id=stored_webex_id,  # Timestamped for personal rooms
+                original_webex_meeting_id=original_webex_meeting_id,
                 meeting_number=meeting_number,
                 meeting_link=meeting_link,
                 meeting_title=meeting_title,
@@ -468,7 +499,8 @@ async def register_and_join_meeting_with_link(
                 cohost_emails=cohost_emails,
                 scheduled_start_time=scheduled_start,
                 scheduled_end_time=scheduled_end,
-                meeting_type=scheduled_type or "meeting",  # Use scheduled_type (more accurate)
+                meeting_type=meeting_type or "meeting",  # Use meetingType from API
+                scheduled_type=scheduled_type,  # Store scheduledType separately
                 screenshots_enabled=settings.enable_screenshots,  # Use .env setting
                 # API parameters override .env if provided, otherwise use .env
                 non_voting_enabled=request.enable_non_voting if request.enable_non_voting is not None else settings.enable_non_voting,
