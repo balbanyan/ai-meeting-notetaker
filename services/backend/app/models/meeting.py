@@ -21,10 +21,15 @@ class Meeting(Base):
     
     # Meeting Details from List Meetings API
     host_email = Column(String(255), nullable=True, index=True)
-    participant_emails = Column(JSON, nullable=True)  # List of participant emails (non-cohosts only)
-    cohost_emails = Column(JSON, default=list)  # List of cohost emails (separate from participants)
+    invitees_emails = Column(JSON, nullable=True)  # List of invited emails before meeting (from Meeting Invitees API)
+    cohost_emails = Column(JSON, default=list)  # List of cohost emails (separate from invitees)
+    participants_emails = Column(JSON, default=list)  # List of actual participants who joined (from List Meeting Participants API)
     scheduled_start_time = Column(DateTime(timezone=True), nullable=True, index=True)
     scheduled_end_time = Column(DateTime(timezone=True), nullable=True)
+    
+    # Access Control (placeholder for future use)
+    classification = Column(String(50), nullable=True)  # Access type: "host_only", "participants" (not implemented yet)
+    shared_with = Column(JSON, default=list)  # Emails the meeting details have been shared with (not implemented yet)
     
     # Bot Participation Tracking
     actual_join_time = Column(DateTime(timezone=True), nullable=True)
@@ -32,7 +37,7 @@ class Meeting(Base):
     is_active = Column(Boolean, default=False, index=True)
     
     # Meeting Classification
-    meeting_type = Column(String(50), nullable=True)  # "meeting", "webinar", "personalRoomMeeting", "scheduledMeeting" (from meetingType)
+    meeting_type = Column(String(50), nullable=True)  # "meeting", "webinar", "personalRoomMeeting", "meetingSeries", "scheduledMeeting" (from List Meetings by Admin API)
     scheduled_type = Column(String(50), nullable=True)  # "meeting", "webinar", "personalRoomMeeting" (from scheduledType)
     
     # AI-Generated Content

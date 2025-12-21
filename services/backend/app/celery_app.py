@@ -17,7 +17,8 @@ celery_app = Celery(
         "app.tasks.transcription",
         "app.tasks.vision",
         "app.tasks.llm",
-        "app.tasks.non_voting"
+        "app.tasks.non_voting",
+        "app.tasks.participants"
     ]
 )
 

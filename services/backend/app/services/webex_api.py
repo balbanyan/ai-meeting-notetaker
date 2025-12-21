@@ -211,7 +211,7 @@ class WebexMeetingsAPI:
             
         Returns:
             Dict with:
-                - participant_emails: List of non-cohost invitees
+                - invitees_emails: List of non-cohost invitees
                 - cohost_emails: List of cohost invitees
         """
         try:
@@ -237,8 +237,8 @@ class WebexMeetingsAPI:
                 data = response.json()
                 items = data.get("items", [])
                 
-                # Separate participants and cohosts
-                participant_emails = []
+                # Separate invitees and cohosts
+                invitees_emails = []
                 cohost_emails = []
                 
                 for invitee in items:
@@ -249,55 +249,128 @@ class WebexMeetingsAPI:
                         if is_cohost:
                             cohost_emails.append(email)
                         else:
-                            participant_emails.append(email)
+                            invitees_emails.append(email)
                 
-                print(f"✅ Retrieved {len(participant_emails)} participants, {len(cohost_emails)} cohosts ({elapsed:.2f}s)")
+                print(f"✅ Retrieved {len(invitees_emails)} invitees, {len(cohost_emails)} cohosts ({elapsed:.2f}s)")
                 return {
-                    "participant_emails": participant_emails,
+                    "invitees_emails": invitees_emails,
                     "cohost_emails": cohost_emails
                 }
             else:
                 print(f"⚠️ List Invitees API error ({elapsed:.2f}s): {response.status_code} - {response.text}")
                 # Don't fail completely - return empty lists
                 return {
-                    "participant_emails": [],
+                    "invitees_emails": [],
                     "cohost_emails": []
                 }
                     
         except Exception as e:
             print(f"⚠️ Failed to get meeting invitees (continuing with empty lists): {str(e)}")
             return {
-                "participant_emails": [],
+                "invitees_emails": [],
                 "cohost_emails": []
             }
     
-    async def get_complete_meeting_data(self, meeting_id: str) -> Dict:
+    async def get_meeting_participants(self, meeting_id: str, host_email: str) -> List[str]:
         """
-        Orchestration method that retrieves complete meeting data using 3 Webex APIs.
+        Call GET /meetingParticipants to get actual participants who joined the meeting.
         
-        Workflow:
-        1. GET /meetings/{meetingId} (Admin API) → metadata
-        2. GET /meetings?meetingNumber&hostEmail → webLink (parallel)
-        3. GET /meeting-invitees → participant list (parallel)
+        API Reference: https://developer.webex.com/docs/api/v1/meeting-participants/list-meeting-participants
+        
+        Args:
+            meeting_id: Webex meeting ID
+            host_email: Host email for the meeting
+            
+        Returns:
+            List of participant email addresses
+        """
+        try:
+            access_token = await self._get_access_token()
+            
+            start_time = time.time()
+            client = await self._get_client()
+            response = await client.get(
+                f"{self.base_url}/meetingParticipants",
+                params={
+                    "meetingId": meeting_id,
+                    "hostEmail": host_email,
+                    "max": 100
+                },
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                }
+            )
+            elapsed = time.time() - start_time
+            
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get("items", [])
+                
+                # Extract participant emails
+                participant_emails = []
+                for participant in items:
+                    email = participant.get("email")
+                    if email:
+                        participant_emails.append(email)
+                
+                print(f"✅ Retrieved {len(participant_emails)} participants from meeting ({elapsed:.2f}s)")
+                return participant_emails
+            else:
+                print(f"⚠️ List Meeting Participants API error ({elapsed:.2f}s): {response.status_code} - {response.text}")
+                return []
+                    
+        except Exception as e:
+            print(f"⚠️ Failed to get meeting participants: {str(e)}")
+            return []
+    
+    async def get_meeting_types_from_list_admin(self, web_link: str) -> Optional[Dict]:
+        """
+        Get meeting_type and scheduled_type from List Meetings by Admin API.
+        This API returns correct meetingType even with current=true.
+        """
+        try:
+            access_token = await self._get_access_token()
+            client = await self._get_client()
+            
+            start_time = time.time()
+            response = await client.get(
+                f"{self.base_url}/admin/meetings",
+                params={
+                    "webLink": web_link,
+                    "current": "true"
+                },
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                }
+            )
+            elapsed = time.time() - start_time
+            
+            if response.status_code == 200:
+                items = response.json().get("items", [])
+                if items:
+                    meeting_type = items[0].get("meetingType")
+                    scheduled_type = items[0].get("scheduledType")
+                    print(f"✅ Got meeting types from List Admin API ({elapsed:.2f}s): meetingType={meeting_type}, scheduledType={scheduled_type}")
+                    return {
+                        "meeting_type": meeting_type,
+                        "scheduled_type": scheduled_type
+                    }
+            print(f"⚠️ Could not get meeting types from List Admin API ({elapsed:.2f}s)")
+            return None
+        except Exception as e:
+            print(f"⚠️ Failed to get meeting types from List Admin API: {str(e)}")
+            return None
+    
+    async def get_complete_meeting_data(self, meeting_id: str, list_api_types: Optional[Dict] = None) -> Dict:
+        """
+        Orchestration method that retrieves complete meeting data using Webex APIs.
         
         Args:
             meeting_id: Webex meeting ID from SDK
-            
-        Returns:
-            {
-                "webex_meeting_id": str,
-                "meeting_number": str,
-                "host_email": str,
-                "scheduled_start_time": str (ISO 8601),
-                "scheduled_end_time": str (ISO 8601),
-                "scheduled_type": str,
-                "meeting_link": str,
-                "participant_emails": List[str],
-                "cohost_emails": List[str],
-                "title": str,
-                "meeting_type": str,
-                "meeting_series_id": str  # Original meeting ID for scheduled meetings (meetingSeriesId)
-            }
+            list_api_types: Optional dict with meeting_type and scheduled_type from List Admin API
+                           (if already fetched by find_meeting_id_by_link)
         """
         try:
             print(f"📋 Fetching complete meeting data from Webex")
@@ -314,7 +387,7 @@ class WebexMeetingsAPI:
             if not meeting_number or not host_email:
                 raise Exception(f"Missing required fields: meeting_number={meeting_number}, host_email={host_email}")
             
-            # Steps 2 & 3: Parallel calls for webLink and invitees
+            # Step 2: Parallel calls for webLink and invitees
             parallel_start = time.time()
             print(f"🔄 Fetching webLink and invitees in parallel...")
             weblink_task = self.get_meeting_weblink(meeting_number, host_email)
@@ -327,29 +400,42 @@ class WebexMeetingsAPI:
             if not weblink:
                 raise Exception("Failed to retrieve meeting webLink")
             
+            # Step 3: Get correct meeting types from List Admin API
+            # Use pre-fetched types if provided, otherwise fetch using weblink
+            if list_api_types:
+                meeting_type = list_api_types.get("meeting_type")
+                scheduled_type = list_api_types.get("scheduled_type")
+                print(f"✅ Using pre-fetched types: meetingType={meeting_type}, scheduledType={scheduled_type}")
+            else:
+                types_data = await self.get_meeting_types_from_list_admin(weblink)
+                if types_data:
+                    meeting_type = types_data.get("meeting_type")
+                    scheduled_type = types_data.get("scheduled_type")
+                else:
+                    # Fallback to admin_data (may have incorrect meetingType)
+                    print(f"⚠️ Falling back to Get by ID Admin API for types")
+                    meeting_type = admin_data.get("meeting_type")
+                    scheduled_type = admin_data.get("scheduled_type")
+            
             # Return combined data
-            # Use meeting_id from API response (has timestamp for scheduled meetings) or fallback to input
             api_meeting_id = admin_data.get("meeting_id") or meeting_id
             result = {
-                "webex_meeting_id": api_meeting_id,  # Actual meeting ID from API (may include timestamp for scheduled meetings)
+                "webex_meeting_id": api_meeting_id,
                 "meeting_number": meeting_number,
                 "host_email": host_email,
                 "scheduled_start_time": admin_data.get("start"),
                 "scheduled_end_time": admin_data.get("end"),
                 "meeting_link": weblink,
-                "participant_emails": invitees.get("participant_emails", []),
+                "invitees_emails": invitees.get("invitees_emails", []),
                 "cohost_emails": invitees.get("cohost_emails", []),
                 "title": admin_data.get("title"),
-                "scheduled_type": admin_data.get("scheduled_type"),  # "meeting", "webinar", "personalRoomMeeting"
-                "meeting_type": admin_data.get("meeting_type"),  # "meeting", "webinar", "personalRoomMeeting", "scheduledMeeting"
-                "meeting_series_id": admin_data.get("meeting_series_id")  # Original meeting ID for scheduled meetings
+                "scheduled_type": scheduled_type,
+                "meeting_type": meeting_type,
+                "meeting_series_id": admin_data.get("meeting_series_id")
             }
             
             print(f"✅ Complete meeting data retrieved successfully")
-            print(f"   Meeting Number Length: {len(meeting_number)}")
-            print(f"   Host Length: {len(host_email)}")
-            print(f"   WebLink Length: {len(weblink)}..." if weblink else "   WebLink: None")
-            print(f"   Participants Length: {len(invitees.get('participant_emails', []))}, Cohosts Length: {len(invitees.get('cohost_emails', []))}")
+            print(f"   Meeting Type: {meeting_type}, Scheduled Type: {scheduled_type}")
             
             return result
             
@@ -357,35 +443,29 @@ class WebexMeetingsAPI:
             print(f"❌ Failed to get complete meeting data: {str(e)}")
             raise
 
-    async def find_meeting_id_by_link(self, meeting_link: str) -> Optional[str]:
+    async def find_meeting_id_by_link(self, meeting_link: str) -> Optional[Dict]:
         """
-        Find meeting_id by matching webLink using List Meetings by Admin API.
+        Find meeting by webLink using List Meetings by Admin API.
+        Returns meeting_id, meeting_type, and scheduled_type.
         
         Args:
             meeting_link: Full Webex meeting URL
             
         Returns:
-            meeting_id (str) if found, None otherwise
-            
-        Workflow:
-            1. GET /meetings (List Meetings by Admin)
-            2. Filter results where webLink == meeting_link
-            3. Return matching meeting's id
+            Dict with meeting_id, meeting_type, scheduled_type if found, None otherwise
         """
         try:
             print(f"🔍 Finding meeting by link...")
             
             access_token = await self._get_access_token()
             
-            # Call List Meetings by Admin API with webLink parameter
-            # The API requires either meetingNumber or webLink as a filter
             start_time = time.time()
             client = await self._get_client()
             response = await client.get(
                 f"{self.base_url}/admin/meetings",
                 params={
-                    "webLink": meeting_link,  # Search directly by webLink
-                    "current": "true"  # Get current instance for scheduled meetings
+                    "webLink": meeting_link,
+                    "current": "true"
                 },
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -395,26 +475,27 @@ class WebexMeetingsAPI:
             elapsed = time.time() - start_time
             
             if response.status_code != 200:
-                error_detail = response.text
-                print(f"❌ List Meetings API failed ({elapsed:.2f}s): {response.status_code}")
-                print(f"   Error details: {error_detail}")
+                print(f"❌ List Meetings by Admin API failed ({elapsed:.2f}s): {response.status_code}")
                 return None
             
             data = response.json()
             meetings = data.get("items", [])
             print(f"📋 Found {len(meetings)} meeting(s) for link ({elapsed:.2f}s)")
             
-            # Should return exactly one meeting
             if meetings:
-                meeting_id = meetings[0]["id"]
-                print(f"✅ Found meeting")
-                return meeting_id
+                meeting = meetings[0]
+                print(f"✅ Found meeting (meetingType: {meeting.get('meetingType')}, scheduledType: {meeting.get('scheduledType')})")
+                return {
+                    "meeting_id": meeting.get("id"),
+                    "meeting_type": meeting.get("meetingType"),
+                    "scheduled_type": meeting.get("scheduledType")
+                }
             else:
                 print(f"❌ No meeting found with webLink")
                 return None
                 
         except httpx.TimeoutException:
-            print(f"❌ Error finding meeting by link: Request timed out (cold start?)")
+            print(f"❌ Error finding meeting by link: Request timed out")
             return None
         except httpx.ConnectError as e:
             print(f"❌ Error finding meeting by link: Connection failed - {str(e)}")
@@ -428,21 +509,21 @@ class WebexMeetingsAPI:
         Get complete meeting data starting from link only.
         
         Workflow:
-            1. find_meeting_id_by_link() to get meeting_id
-            2. Use EXISTING get_complete_meeting_data(meeting_id) method
-               - Calls GET /meetings/{id} (admin API)
-               - Calls GET /meetings?meetingNumber&hostEmail (for webLink)
-               - Calls GET /meeting-invitees (for participants/cohosts)
-               - Returns all metadata in same format
+            1. find_meeting_id_by_link() to get meeting_id and types from List Admin API
+            2. Pass types to get_complete_meeting_data() to avoid duplicate API call
         """
         print(f"🔗 Getting complete meeting data from link...")
         
-        # Step 1: Find meeting_id from link
-        meeting_id = await self.find_meeting_id_by_link(meeting_link)
+        # Step 1: Find meeting_id and types from List Admin API
+        link_result = await self.find_meeting_id_by_link(meeting_link)
         
-        if not meeting_id:
+        if not link_result:
             raise Exception(f"No meeting found with the provided link")
         
-        # Step 2: Use existing method (same as current workflow)
-        return await self.get_complete_meeting_data(meeting_id)
+        # Step 2: Pass types from List Admin API
+        list_api_types = {
+            "meeting_type": link_result.get("meeting_type"),
+            "scheduled_type": link_result.get("scheduled_type")
+        }
+        return await self.get_complete_meeting_data(link_result["meeting_id"], list_api_types=list_api_types)
 

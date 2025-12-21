@@ -90,6 +90,13 @@ async def save_audio_chunk(
         transcribe_chunk.delay(str(chunk.id))
         print(f"🔄 TRANSCRIPTION QUEUED [Celery] - Meeting: {meeting_id}, Chunk UUID: {chunk.id}")
         
+        # Queue participant fetch if interval reached (chunk-based timing)
+        from app.core.config import settings
+        if chunk_id > 0 and chunk_id % settings.participants_fetch_interval_chunks == 0:
+            from app.tasks.participants import fetch_meeting_participants
+            fetch_meeting_participants.delay(meeting_id)
+            print(f"👥 PARTICIPANT FETCH QUEUED [Celery] - Meeting: {meeting_id}, Chunk #{chunk_id}")
+        
         return SaveChunkResponse(
             status="saved",
             message=f"Audio chunk saved successfully",

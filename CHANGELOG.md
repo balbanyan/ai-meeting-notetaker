@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.5.0] - 2025-12-21
+
+### Added
+- **Live Participants Tracking**: Periodically fetch actual participants who joined the meeting
+  - New `participants_emails` column stores emails from List Meeting Participants API
+  - Chunk-based triggering: fetches every N chunks (configurable, default 30 = ~5 mins)
+  - Only appends NEW emails not already in host, cohosts, invitees, or existing participants
+  - New Celery task `fetch_meeting_participants` handles async API calls
+
+- **New Webex API Function**: `get_meeting_participants(meeting_id, host_email)`
+  - Calls `GET /meetingParticipants` endpoint
+  - Returns list of participant emails from active meeting
+
+- **Database Schema: New Columns**
+  - `participants_emails` (JSON): Actual participants who joined the meeting
+  - `classification` (String): Placeholder for access type (host_only / participants) - not implemented yet
+  - `shared_with` (JSON): Placeholder for shared emails - not implemented yet
+
+- **Config Setting**: `PARTICIPANTS_FETCH_INTERVAL_CHUNKS`
+  - Default: 30 chunks (~5 minutes at 10-second chunk intervals)
+  - Controls how often live participants are fetched during a meeting
+
+### Changed
+- **Column Rename**: `participant_emails` → `invitees_emails`
+  - Clarifies this column stores pre-meeting invitees (from Meeting Invitees API)
+  - Distinguishes from `participants_emails` (actual joiners from Meeting Participants API)
+  - Updated all references in: `meeting.py`, `webex_api.py`, `join.py`, `frontend.py`, `schemas.py`, `status.py`
+
+- **Meeting Type Source Fix**: `meeting_type` and `scheduled_type` now sourced from List Meetings by Admin API
+  - Previous: Used Get Meeting by ID Admin API (returned incorrect `meetingType` with `current=true`)
+  - Now: Uses `GET /admin/meetings?webLink=X&current=true` which returns correct values
+  - Added `get_meeting_types_from_list_admin()` helper function
+  - Modified `get_complete_meeting_data()` to accept optional pre-fetched types
+  - `find_meeting_id_by_link()` now returns dict with `meeting_id`, `meeting_type`, `scheduled_type`
+
+### Technical Details
+- Participant fetch uses simple modulo check: `if chunk_id % interval == 0`
+- Fetch task runs in Celery worker, doesn't block audio processing
+- Duplicate detection is case-insensitive (emails normalized to lowercase)
+- API responses updated to include `participants_emails` field
+
+### Environment Variables Added
+```bash
+# Participants Tracking Settings
+PARTICIPANTS_FETCH_INTERVAL_CHUNKS=30  # Fetch participants every N chunks (~5 mins at 10s chunks)
+```
+
+---
+
 ## [2.4.0] - 2025-12-18
 
 ### Added

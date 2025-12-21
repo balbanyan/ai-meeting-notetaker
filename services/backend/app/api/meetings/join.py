@@ -92,7 +92,7 @@ async def register_and_join_meeting(
         meeting_number = meeting_data["meeting_number"]
         meeting_title = meeting_data.get("title")
         host_email = meeting_data["host_email"]
-        participant_emails = meeting_data.get("participant_emails", [])
+        invitees_emails = meeting_data.get("invitees_emails", [])
         cohost_emails = meeting_data.get("cohost_emails", [])
         scheduled_type = meeting_data.get("scheduled_type")  # "meeting", "webinar", "personalRoomMeeting"
         meeting_type = meeting_data.get("meeting_type")  # "meeting", "webinar", "personalRoomMeeting", "scheduledMeeting"
@@ -174,7 +174,7 @@ async def register_and_join_meeting(
             # Only set actual_join_time on first join, not on rejoins
             if not existing_meeting.actual_join_time:
                 existing_meeting.actual_join_time = datetime.utcnow()
-            existing_meeting.participant_emails = participant_emails
+            existing_meeting.invitees_emails = invitees_emails
             existing_meeting.cohost_emails = cohost_emails
             existing_meeting.host_email = host_email
             existing_meeting.meeting_link = meeting_link
@@ -221,7 +221,7 @@ async def register_and_join_meeting(
                 meeting_link=meeting_link,
                 meeting_title=meeting_title,
                 host_email=host_email,
-                participant_emails=participant_emails,
+                invitees_emails=invitees_emails,
                 cohost_emails=cohost_emails,
                 scheduled_start_time=scheduled_start,
                 scheduled_end_time=scheduled_end,
@@ -365,16 +365,23 @@ async def register_and_join_meeting_with_link(
         
         try:
             # Step 1: Find meeting_id from link first (lightweight check)
-            webex_meeting_id = await webex_api.find_meeting_id_by_link(request.meeting_link)
+            # Also returns meeting_type and scheduled_type from List Meetings by Admin API
+            link_result = await webex_api.find_meeting_id_by_link(request.meeting_link)
             
-            if not webex_meeting_id:
+            if not link_result:
                 raise HTTPException(
                     status_code=404,
                     detail="No meeting found with the provided link"
                 )
             
-            # Fetch complete meeting data
-            meeting_data = await webex_api.get_complete_meeting_data(webex_meeting_id)
+            webex_meeting_id = link_result["meeting_id"]
+            list_api_types = {
+                "meeting_type": link_result.get("meeting_type"),
+                "scheduled_type": link_result.get("scheduled_type")
+            }
+            
+            # Fetch complete meeting data, passing the types from List Admin API
+            meeting_data = await webex_api.get_complete_meeting_data(webex_meeting_id, list_api_types=list_api_types)
         finally:
             await webex_api.close()  # Close HTTP client to release connections
         
@@ -383,7 +390,7 @@ async def register_and_join_meeting_with_link(
         meeting_number = meeting_data["meeting_number"]
         meeting_title = meeting_data.get("title")
         host_email = meeting_data["host_email"]
-        participant_emails = meeting_data.get("participant_emails", [])
+        invitees_emails = meeting_data.get("invitees_emails", [])
         cohost_emails = meeting_data.get("cohost_emails", [])
         scheduled_type = meeting_data.get("scheduled_type")  # "meeting", "webinar", "personalRoomMeeting"
         meeting_type = meeting_data.get("meeting_type")  # "meeting", "webinar", "personalRoomMeeting", "scheduledMeeting"
@@ -464,7 +471,7 @@ async def register_and_join_meeting_with_link(
             existing_meeting.meeting_link = meeting_link
             existing_meeting.meeting_title = meeting_title
             existing_meeting.host_email = host_email
-            existing_meeting.participant_emails = participant_emails
+            existing_meeting.invitees_emails = invitees_emails
             existing_meeting.cohost_emails = cohost_emails
             existing_meeting.scheduled_start_time = scheduled_start
             existing_meeting.scheduled_end_time = scheduled_end
@@ -495,7 +502,7 @@ async def register_and_join_meeting_with_link(
                 meeting_link=meeting_link,
                 meeting_title=meeting_title,
                 host_email=host_email,
-                participant_emails=participant_emails,
+                invitees_emails=invitees_emails,
                 cohost_emails=cohost_emails,
                 scheduled_start_time=scheduled_start,
                 scheduled_end_time=scheduled_end,

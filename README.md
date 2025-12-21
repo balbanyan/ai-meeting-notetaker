@@ -265,7 +265,8 @@ curl -X POST http://localhost:8080/api/meetings/test-join \
 - `meeting_number` (String) - Webex meeting number
 - `meeting_link` (String) - Meeting web link
 - `host_email` (String) - Meeting host email
-- `participant_emails` (Array) - List of participant emails
+- `invitees_emails` (Array) - List of invited emails before meeting
+- `participants_emails` (Array) - List of actual participants who joined
 - `is_active` (Boolean) - Currently active status
 - `scheduled_start_time` (Timestamp) - Scheduled start time
 - `scheduled_end_time` (Timestamp) - Scheduled end time

@@ -102,8 +102,9 @@ class MeetingListItem(BaseModel):
     meeting_number: Optional[str]
     meeting_title: Optional[str]
     host_email: Optional[str]
-    participant_emails: Optional[List[str]]
+    invitees_emails: Optional[List[str]]
     cohost_emails: Optional[List[str]]
+    participants_emails: Optional[List[str]]  # Actual participants who joined the meeting
     scheduled_start_time: Optional[datetime]
     scheduled_end_time: Optional[datetime]
     actual_join_time: Optional[datetime]
@@ -146,8 +147,9 @@ class MeetingDetailsResponse(BaseModel):
     meeting_title: Optional[str]
     meeting_link: str
     host_email: Optional[str]
-    participant_emails: Optional[List[str]]
+    invitees_emails: Optional[List[str]]
     cohost_emails: Optional[List[str]]
+    participants_emails: Optional[List[str]]  # Actual participants who joined the meeting
     scheduled_start_time: Optional[datetime]
     scheduled_end_time: Optional[datetime]
     actual_join_time: Optional[datetime]
