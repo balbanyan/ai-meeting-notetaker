@@ -6,6 +6,96 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.6.1] - 2025-12-22
+
+### Added
+- **Locked Meeting Lobby Support**: Bot now properly handles locked meetings with waiting rooms
+  - Detects when bot is placed in lobby after joining
+  - Listens for `meeting:self:guestAdmitted` event from Webex SDK
+  - Waits up to 10 minutes for host to admit the bot
+  - API returns immediately with `inLobby: true` status instead of hanging
+  - Media setup completes automatically in background after admission
+
+- **New Lobby-Related Features**:
+  - `inLobby` property added to track lobby status
+  - `/join` API now returns `{ success: true, inLobby: true, message: "Bot is waiting in lobby for host admission" }`
+  - `/meetings/:id/status` endpoint includes `inLobby` field
+  - Background process `waitForLobbyAdmissionAndSetupMedia()` handles post-admission setup
+
+### Changed
+- **Console Log Filtering**: Added filter to exclude verbose Webex SDK diagnostic logs
+  - Filters out `wx-js-sdk`, `CallDiagnostic`, and `call-diagnostic` internal logs
+  - Keeps lobby-related status logs visible for debugging
+
+- **Bot-Runner Manager**: Updated to pass through `inLobby` status in API responses
+
+### Fixed
+- **Locked Meeting Join Failure**: Previously, bot would fail immediately with "user is still in the lobby or not joined" error when joining locked meetings. Now it waits for admission before attempting media connection.
+
+---
+
+## [2.6.0] - 2025-12-22
+
+### Added
+- **JWT User Authorization**: Added user-level authentication using JWT tokens
+  - Users can only access meetings where their email appears in any email column
+  - Checks: `host_email`, `invitees_emails`, `cohost_emails`, `participants_emails`, `shared_with`
+  - New dependency: `PyJWT>=2.8.0`
+
+- **New Auth Functions** in `app/core/auth.py`:
+  - `decode_jwt_token()`: FastAPI dependency for HTTP endpoints (extracts from Authorization header)
+  - `decode_jwt_token_raw()`: Direct function for WebSocket authentication
+  - `check_meeting_access()`: Checks if user email has access to a meeting
+
+- **Custom Error Handler**: Added consistent JSON error responses in `main.py`
+  - 401 errors: `{"error": "Authentication required", "detail": "..."}`
+  - 403 errors: `{"error": "Access denied", "detail": "..."}`
+  - Other errors: `{"error": "..."}`
+
+### Changed
+- **APIs Now Require JWT Authentication**:
+  - `GET /api/meetings/list`: Requires JWT, filters to user's accessible meetings only
+  - `GET /api/meetings/{meeting_uuid}`: Requires JWT + access check (403 if denied)
+  - `GET /api/meetings/status/{meeting_identifier}`: Requires JWT + access check
+  - `GET /api/screenshots/image/{screenshot_id}`: Requires JWT + access check (verifies user has access to meeting)
+
+- **WebSocket Endpoint Consolidated for Security**:
+  - **Removed**: `/ws/meeting/{meeting_id}` and `/ws/meeting-by-link?link=...`
+  - **New**: Single `/ws/meeting` endpoint with no sensitive data in URL
+  - Meeting ID/link now sent in encrypted first auth message
+  - Auth message format: `{"type": "auth", "token": "...", "meeting_id": "..."}` or `{"type": "auth", "token": "...", "meeting_link": "..."}`
+  - Success response: `{"type": "auth_success", "meeting_id": "...", "user": {...}}`
+
+### Removed
+- **External APIs Deleted**: `/api/meetings/process-transcripts` and `/api/meetings/get-transcripts`
+  - These endpoints were not used anywhere in the codebase
+  - Removed `external.py`, related schemas, and `verify_external_api_key()` function
+
+- **Unused Debugging Endpoints Deleted**:
+  - `GET /api/audio/chunks/{meeting_id}` (was unused)
+  - `GET /api/screenshots/{meeting_id}` (was unused)
+
+- **Environment Variable Removed**: `EXTERNAL_API_KEY` (no longer needed)
+
+### Environment Variables
+```bash
+# Add these new variables
+JWT_SECRET_KEY=your-secret-key-here  # Must match auth service (min 32 chars)
+JWT_ALGORITHM=HS256
+
+# Remove this variable
+# EXTERNAL_API_KEY=...  # No longer needed
+```
+
+### Migration Notes
+1. Install new dependency: `pip install PyJWT>=2.8.0`
+2. Add `JWT_SECRET_KEY` and `JWT_ALGORITHM` to your `.env` file
+3. Remove `EXTERNAL_API_KEY` from your `.env` file
+4. Update frontend to send JWT tokens in Authorization header
+5. Update WebSocket clients to use new `/ws/meeting` endpoint with auth message
+
+---
+
 ## [2.5.0] - 2025-12-21
 
 ### Added

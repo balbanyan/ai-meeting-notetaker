@@ -26,8 +26,9 @@ class Settings(BaseSettings):
     enable_screenshots: bool = False
     vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     
-    # External API Authentication
-    external_api_key: str = ""
+    # JWT Configuration (for user authentication)
+    jwt_secret_key: str = ""
+    jwt_algorithm: str = "HS256"
     
     # Palantir API Settings
     palantir_token: str = ""

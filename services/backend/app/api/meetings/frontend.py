@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import case, desc
+from sqlalchemy import case, desc, or_
+from typing import Dict, Any
 import uuid
 from app.core.database import get_db
+from app.core.auth import decode_jwt_token, check_meeting_access
 from app.models.meeting import Meeting
 from app.models.speaker_transcript import SpeakerTranscript
 from .schemas import (
@@ -17,45 +19,85 @@ router = APIRouter()
 
 
 # ============================================================================
-# FRONTEND API ENDPOINTS - Meeting List & Details
+# FRONTEND API ENDPOINTS - Meeting List & Details (JWT Protected)
 # ============================================================================
 
 
 @router.get("/meetings/list", response_model=MeetingsListResponse)
-async def list_meetings(db: Session = Depends(get_db)):
+async def list_meetings(
+    db: Session = Depends(get_db),
+    user: Dict[str, Any] = Depends(decode_jwt_token)
+):
     """
-    Get all meetings (both active and completed) for the frontend dashboard.
+    Get meetings accessible to the authenticated user.
     
-    Returns meetings ordered by most recent first:
+    Returns meetings where the user's email appears in:
+    - host_email
+    - invitees_emails
+    - cohost_emails
+    - participants_emails
+    - shared_with
+    
+    Ordered by most recent first:
     - Active meetings: ordered by actual_join_time DESC
     - Completed meetings: ordered by actual_leave_time DESC
-    No authentication required - matches embedded app pattern.
+    
+    Requires JWT authentication.
     """
     try:
-        print(f"📋 LIST MEETINGS: fetching all meetings (active and completed)")
+        user_email = user.get("email", "").lower()
+        print(f"📋 LIST MEETINGS: fetching meetings for user {user_email}")
         
-        # Query all meetings (both active and inactive)
-        # Order by: active meetings first (by join time), then completed meetings (by leave time)
-        meetings = db.query(Meeting).order_by(
+        # Query meetings where user has access
+        # Filter by: user email appears in any email column
+        meetings = db.query(Meeting).filter(
+            or_(
+                Meeting.host_email.ilike(user_email),
+                Meeting.invitees_emails.contains([user_email]),
+                Meeting.cohost_emails.contains([user_email]),
+                Meeting.participants_emails.contains([user_email]),
+                Meeting.shared_with.contains([user_email])
+            )
+        ).order_by(
             # First, sort by is_active (True first, False second)
             desc(Meeting.is_active),
             # Then within each group, sort by appropriate time
-            # For active: use actual_join_time DESC
-            # For inactive: use actual_leave_time DESC
             desc(case(
                 (Meeting.is_active == True, Meeting.actual_join_time),
                 else_=Meeting.actual_leave_time
             ))
         ).all()
         
-        active_count = sum(1 for m in meetings if m.is_active)
-        completed_count = len(meetings) - active_count
+        # Additional filter in Python for case-insensitive check on JSON arrays
+        # (SQLAlchemy JSON contains may not handle case-insensitivity well)
+        filtered_meetings = []
+        for meeting in meetings:
+            if check_meeting_access(user_email, meeting):
+                filtered_meetings.append(meeting)
         
-        print(f"✅ Found {len(meetings)} meeting(s): {active_count} active, {completed_count} completed")
+        # If SQL filter didn't work well, query all and filter in Python
+        if not filtered_meetings and not meetings:
+            # Fallback: query all meetings and filter in Python
+            all_meetings = db.query(Meeting).order_by(
+                desc(Meeting.is_active),
+                desc(case(
+                    (Meeting.is_active == True, Meeting.actual_join_time),
+                    else_=Meeting.actual_leave_time
+                ))
+            ).all()
+            
+            filtered_meetings = [m for m in all_meetings if check_meeting_access(user_email, m)]
+        elif not filtered_meetings:
+            filtered_meetings = [m for m in meetings if check_meeting_access(user_email, m)]
+        
+        active_count = sum(1 for m in filtered_meetings if m.is_active)
+        completed_count = len(filtered_meetings) - active_count
+        
+        print(f"✅ Found {len(filtered_meetings)} meeting(s) for user: {active_count} active, {completed_count} completed")
         
         # Build response items
         meeting_items = []
-        for meeting in meetings:
+        for meeting in filtered_meetings:
             item = MeetingListItem(
                 meeting_uuid=str(meeting.id),
                 webex_meeting_id=meeting.webex_meeting_id,
@@ -79,9 +121,11 @@ async def list_meetings(db: Session = Depends(get_db)):
         
         return MeetingsListResponse(
             meetings=meeting_items,
-            total_count=len(meetings)
+            total_count=len(filtered_meetings)
         )
     
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ LIST MEETINGS FAILED - {str(e)}")
         import traceback
@@ -93,7 +137,11 @@ async def list_meetings(db: Session = Depends(get_db)):
 
 
 @router.get("/meetings/status/{meeting_identifier}", response_model=MeetingStatusResponse)
-async def get_meeting_status(meeting_identifier: str, db: Session = Depends(get_db)):
+async def get_meeting_status(
+    meeting_identifier: str,
+    db: Session = Depends(get_db),
+    user: Dict[str, Any] = Depends(decode_jwt_token)
+):
     """
     Check if a bot is active for a meeting.
     
@@ -102,32 +150,40 @@ async def get_meeting_status(meeting_identifier: str, db: Session = Depends(get_
     - Webex meeting ID: Checks original_webex_meeting_id (matches embedded app meeting ID)
     
     Returns simple status response with is_active boolean.
-    No authentication required - matches embedded app pattern.
+    Returns 403 if user doesn't have access to the meeting.
+    
+    Requires JWT authentication.
     """
     try:
-        print(f"🔍 GET MEETING STATUS: {meeting_identifier}")
+        user_email = user.get("email", "")
+        print(f"🔍 GET MEETING STATUS: {meeting_identifier} (user: {user_email})")
+        
+        meeting = None
         
         # Try to parse as UUID first
         try:
             uuid_obj = uuid.UUID(meeting_identifier)
-            # Find meeting by UUID and check if active
-            meeting = db.query(Meeting).filter(
-                Meeting.id == uuid_obj,
-                Meeting.is_active == True
-            ).first()
-            is_active = meeting is not None
+            meeting = db.query(Meeting).filter(Meeting.id == uuid_obj).first()
         except ValueError:
-            # Not a UUID - treat as Webex meeting ID and check original_webex_meeting_id
-            # Check if any active meetings exist with this original_webex_meeting_id
-            active_meeting = db.query(Meeting).filter(
-                Meeting.original_webex_meeting_id == meeting_identifier,
-                Meeting.is_active == True
-            ).first()
-            is_active = active_meeting is not None
+            # Not a UUID - treat as Webex meeting ID
+            # Get the latest meeting with this original_webex_meeting_id
+            meeting = db.query(Meeting).filter(
+                Meeting.original_webex_meeting_id == meeting_identifier
+            ).order_by(Meeting.created_at.desc()).first()
         
+        if not meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        # Check user access
+        if not check_meeting_access(user_email, meeting):
+            raise HTTPException(status_code=403, detail="Access denied to this meeting")
+        
+        is_active = meeting.is_active
         print(f"✅ Meeting status: {'active' if is_active else 'inactive'}")
         return MeetingStatusResponse(is_active=is_active)
     
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ GET MEETING STATUS FAILED - {str(e)}")
         import traceback
@@ -139,15 +195,22 @@ async def get_meeting_status(meeting_identifier: str, db: Session = Depends(get_
 
 
 @router.get("/meetings/{meeting_uuid}", response_model=MeetingDetailsResponse)
-async def get_meeting_details(meeting_uuid: str, db: Session = Depends(get_db)):
+async def get_meeting_details(
+    meeting_uuid: str,
+    db: Session = Depends(get_db),
+    user: Dict[str, Any] = Depends(decode_jwt_token)
+):
     """
     Get detailed meeting information including transcripts for a specific meeting.
     
     Accepts UUID only. Returns full meeting data plus all speaker transcripts ordered chronologically.
-    No authentication required - matches embedded app pattern.
+    Returns 403 if user doesn't have access to the meeting.
+    
+    Requires JWT authentication.
     """
     try:
-        print(f"🔍 GET MEETING DETAILS: {meeting_uuid}")
+        user_email = user.get("email", "")
+        print(f"🔍 GET MEETING DETAILS: {meeting_uuid} (user: {user_email})")
         
         # Parse UUID
         try:
@@ -160,6 +223,10 @@ async def get_meeting_details(meeting_uuid: str, db: Session = Depends(get_db)):
         
         if not meeting:
             raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        # Check user access
+        if not check_meeting_access(user_email, meeting):
+            raise HTTPException(status_code=403, detail="Access denied to this meeting")
         
         print(f"✅ Meeting found - {meeting.webex_meeting_id}")
         
@@ -213,4 +280,3 @@ async def get_meeting_details(meeting_uuid: str, db: Session = Depends(get_db)):
             status_code=500,
             detail=f"Failed to retrieve meeting details: {str(e)}"
         )
-

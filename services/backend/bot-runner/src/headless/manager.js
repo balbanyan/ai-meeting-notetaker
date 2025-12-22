@@ -164,16 +164,25 @@ class HeadlessRunner {
               browser: browserInfo.browser,
               browserIndex: browserInfo.browserIndex,
               meetingUrl,
-              startTime: new Date().toISOString()
+              startTime: new Date().toISOString(),
+              inLobby: result.inLobby || false
             });
             
-            console.log(`✅ Meeting joined successfully - ID: ${meetingId}`);
+            // Log appropriate message based on lobby status
+            if (result.inLobby) {
+              console.log(`🚪 Bot waiting in lobby - ID: ${meetingId}`);
+            } else {
+              console.log(`✅ Meeting joined successfully - ID: ${meetingId}`);
+            }
             
-            // Respond with success
+            // Respond with success (include lobby status)
             res.json({ 
               success: true, 
               meetingId: meetingId,
-              message: 'Meeting joined successfully',
+              inLobby: result.inLobby || false,
+              message: result.inLobby 
+                ? 'Bot is waiting in lobby for host admission' 
+                : 'Meeting joined successfully',
               browserIndex: browserInfo.browserIndex
             });
           } else {

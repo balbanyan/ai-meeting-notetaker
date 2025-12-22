@@ -21,6 +21,7 @@ class MultistreamWebexClient {
     this.webexMeetingId = null;  // Webex's meeting ID
     this.hostEmail = null;
     this.isInMeeting = false;
+    this.inLobby = false;  // Track if bot is waiting in lobby
     this.cleanupInProgress = false;  // Guard flag to prevent duplicate cleanup calls
     
     // Use shared components
@@ -71,9 +72,28 @@ class MultistreamWebexClient {
       await this.setupBrowserEnvironment();
       
       // Initialize Webex with multistream and join meeting
-      await this.initializeMultistreamWebexAndJoin(meetingUrl);
+      const joinResult = await this.initializeMultistreamWebexAndJoin(meetingUrl);
       
-      // Set up audio processing
+      // Check if bot is in lobby (locked meeting)
+      if (joinResult.inLobby) {
+        this.logger(`🚪 Bot is waiting in lobby, returning early (Meeting UUID: ${this.meetingUuid})`, 'info');
+        this.isInMeeting = true; // Mark as in meeting (waiting in lobby)
+        this.inLobby = true;     // Track lobby status
+        
+        // Start background process to wait for admission and complete setup
+        this.waitForLobbyAdmissionAndSetupMedia();
+        
+        return {
+          success: true,
+          meetingId: this.meetingUuid,
+          webexMeetingId: this.webexMeetingId,
+          hostEmail: this.hostEmail,
+          inLobby: true,
+          message: 'Bot is waiting in lobby for host admission'
+        };
+      }
+      
+      // Not in lobby - set up audio processing immediately
       await this.initializeAudioProcessor();
       await this.setupAudioProcessing();
       
@@ -204,7 +224,13 @@ class MultistreamWebexClient {
         const type = msg.type();
         const text = msg.text();
         
-        // Keep only: timing logs, connection info, DEBUG logs, and key milestones
+        // Skip verbose Webex SDK internal logs
+        const isSDKInternalLog = text.includes('wx-js-sdk') || 
+                                  text.includes('CallDiagnostic') ||
+                                  text.includes('call-diagnostic');
+        if (isSDKInternalLog) return;
+        
+        // Keep only: timing logs, connection info, DEBUG logs, key milestones, and lobby status
         const isTimingLog = /\(\d+(ms|s)\)/.test(text);
         const isConnectionLog = text.startsWith('🌐 Connection:');
         const isDebugLog = text.includes('[DEBUG]');
@@ -212,8 +238,12 @@ class MultistreamWebexClient {
         const isCriticalStep = text.includes('Starting Webex SDK') || 
                                text.includes('Joining meeting') || 
                                text.includes('Starting addMedia');
+        const isLobbyLog = text.includes('Lobby check') || 
+                           text.includes('in lobby') || 
+                           text.includes('admitted from lobby') ||
+                           text.includes('waiting for host admission');
         
-        if (isTimingLog || isConnectionLog || isDebugLog || isMilestone || isCriticalStep) {
+        if (isTimingLog || isConnectionLog || isDebugLog || isMilestone || isCriticalStep || isLobbyLog) {
           if (type === 'error') {
             this.logger(`[Browser Console ERROR] ${text}`, 'error');
           } else if (type === 'warning') {
@@ -540,6 +570,23 @@ class MultistreamWebexClient {
           }
         });
 
+        // Lobby admission tracking
+        window.lobbyAdmitted = false;
+        window.lobbyResolve = null;
+        
+        // Listen for lobby admission event
+        meeting.on('meeting:self:guestAdmitted', () => {
+          console.log(`✅ Bot admitted from lobby - Meeting UUID: ${meetingUuid}`);
+          window.lobbyAdmitted = true;
+          if (window.lobbyResolve) {
+            window.lobbyResolve();
+          }
+        });
+        
+        // Listen for lobby waiting event (for logging)
+        meeting.on('meeting:self:lobbyWaiting', () => {
+          console.log(`🚪 Bot is waiting in lobby - Meeting UUID: ${meetingUuid}`);
+        });
 
         // Join meeting with multistream enabled
         console.log(`🚪 Joining meeting (Meeting UUID: ${meetingUuid})...`);
@@ -556,7 +603,26 @@ class MultistreamWebexClient {
           throw err;
         }
 
-        // Add media with multistream configuration
+        // Check if we're in the lobby and need to wait for admission
+        const selfState = meeting.locusInfo?.self?.state || meeting.state;
+        const inLobby = meeting.inMeetingLobby || 
+                        meeting.locusInfo?.self?.isInMeetingLobby || 
+                        selfState === 'IDLE' ||
+                        (meeting.locusInfo?.self?.guest && !meeting.locusInfo?.self?.admitted);
+        
+        console.log(`🔍 Lobby check - inLobby: ${inLobby}, state: ${selfState} - Meeting UUID: ${meetingUuid}`);
+        
+        // If in lobby, return early and let the caller handle async admission
+        if (inLobby) {
+          console.log(`⏳ Bot is in lobby, waiting for host admission (max 10 minutes) - Meeting UUID: ${meetingUuid}`);
+          
+          // Store meeting reference for later media setup
+          window.currentMeeting = meeting;
+          
+          return { success: true, inLobby: true, meetingId: meetingUrl };
+        }
+
+        // Add media with multistream configuration (only if not in lobby)
         console.log(`🎧 Starting addMedia (Meeting UUID: ${meetingUuid})...`);
         timings.addMediaStart = Date.now();
         try {
@@ -706,6 +772,123 @@ class MultistreamWebexClient {
 
     this.logger(`✅ Webex multistream initialized and meeting joined in browser (Meeting UUID: ${this.meetingUuid})`, 'success');
     return result;
+  }
+
+  // ============================================================================
+  // LOBBY ADMISSION HANDLING (Background Process)
+  // ============================================================================
+
+  /**
+   * Background process that waits for lobby admission and completes media setup
+   * Called when bot is placed in a locked meeting's lobby
+   */
+  async waitForLobbyAdmissionAndSetupMedia() {
+    const LOBBY_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max wait
+    
+    this.logger(`⏳ Starting background lobby admission wait (Meeting UUID: ${this.meetingUuid})...`, 'info');
+    
+    try {
+      // Wait for admission event in browser context
+      const admissionResult = await this.page.evaluate((timeoutMs, meetingUuid) => {
+        return new Promise((resolve, reject) => {
+          // If already admitted (race condition), resolve immediately
+          if (window.lobbyAdmitted) {
+            console.log(`✅ Already admitted from lobby - Meeting UUID: ${meetingUuid}`);
+            resolve({ admitted: true });
+            return;
+          }
+          
+          // Store resolve function for event handler
+          window.lobbyResolve = () => {
+            resolve({ admitted: true });
+          };
+          
+          // Set timeout
+          const timeoutId = setTimeout(() => {
+            window.lobbyResolve = null;
+            console.error(`❌ Lobby timeout: Host did not admit bot within 10 minutes - Meeting UUID: ${meetingUuid}`);
+            resolve({ admitted: false, timeout: true });
+          }, timeoutMs);
+          
+          // Update resolve to also clear timeout
+          const originalResolve = window.lobbyResolve;
+          window.lobbyResolve = () => {
+            clearTimeout(timeoutId);
+            originalResolve();
+          };
+        });
+      }, LOBBY_TIMEOUT_MS, this.meetingUuid);
+      
+      if (!admissionResult.admitted) {
+        this.logger(`❌ Lobby timeout - Host did not admit bot (Meeting UUID: ${this.meetingUuid})`, 'error');
+        await this.cleanup();
+        return;
+      }
+      
+      this.inLobby = false; // No longer in lobby
+      this.logger(`✅ Bot admitted from lobby, completing media setup (Meeting UUID: ${this.meetingUuid})`, 'success');
+      
+      // Now complete media setup in browser
+      const mediaResult = await this.page.evaluate(async (meetingUuid) => {
+        try {
+          const meeting = window.currentMeeting;
+          if (!meeting) {
+            throw new Error('Meeting reference not found');
+          }
+          
+          console.log(`🎧 Starting addMedia after lobby admission (Meeting UUID: ${meetingUuid})...`);
+          
+          await meeting.addMedia({
+            mediaOptions: {
+              sendAudio: false,
+              sendVideo: false,
+              receiveAudio: true,
+              receiveVideo: true
+            },
+            remoteMediaManagerConfig: {
+              audio: {
+                numOfActiveSpeakerStreams: 1,
+                numOfScreenShareStreams: 1
+              },
+              video: {
+                preferLiveVideo: false,
+                initialLayoutId: 'ScreenShareOnly',
+                layouts: {
+                  ScreenShareOnly: {
+                    screenShareVideo: { size: 'best' },
+                    activeSpeakerVideoPaneGroups: []
+                  }
+                }
+              }
+            }
+          });
+          
+          console.log(`✅ Media connected after lobby admission - Meeting UUID: ${meetingUuid}`);
+          return { success: true };
+          
+        } catch (error) {
+          console.error(`❌ Media setup failed after lobby admission: ${error.message}`);
+          return { success: false, error: error.message };
+        }
+      }, this.meetingUuid);
+      
+      if (!mediaResult.success) {
+        this.logger(`❌ Media setup failed after lobby admission: ${mediaResult.error} (Meeting UUID: ${this.meetingUuid})`, 'error');
+        await this.cleanup();
+        return;
+      }
+      
+      // Complete the rest of the setup
+      await this.initializeAudioProcessor();
+      await this.setupAudioProcessing();
+      await this.setupSpeakerEventProcessing();
+      
+      this.logger(`🎉 Meeting fully connected after lobby admission (Meeting UUID: ${this.meetingUuid})!`, 'success');
+      
+    } catch (error) {
+      this.logger(`❌ Error in lobby admission handling: ${error.message} (Meeting UUID: ${this.meetingUuid})`, 'error');
+      await this.cleanup();
+    }
   }
 
   // ============================================================================
@@ -1131,12 +1314,14 @@ class MultistreamWebexClient {
     this.meetingUuid = null;
     this.webexMeetingId = null;
     this.hostEmail = null;
+    this.inLobby = false;
     this.audioProcessor = null;
   }
 
   getStatus() {
     return {
       isInMeeting: this.isInMeeting,
+      inLobby: this.inLobby,
       meetingUrl: this.meetingUrl,
       meetingUuid: this.meetingUuid,
       webexMeetingId: this.webexMeetingId,
@@ -1144,7 +1329,7 @@ class MultistreamWebexClient {
       mode: 'headless-multistream',
       audioProcessing: !!this.audioProcessor,
       speakerEventProcessing: !!this.speakerEventInterval,
-      features: ['multistream', 'speaker-detection', 'debouncing']
+      features: ['multistream', 'speaker-detection', 'debouncing', 'lobby-handling']
     };
   }
 }

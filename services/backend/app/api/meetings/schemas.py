@@ -53,45 +53,6 @@ class UpdateMeetingStatusRequest(BaseModel):
 
 
 # ============================================================================
-# EXTERNAL API SCHEMAS
-# ============================================================================
-
-class ProcessTranscriptsRequest(BaseModel):
-    meeting_link: str
-    system_prompt: str
-    model: str = "openai/gpt-oss-120b"
-    meeting_id: Optional[str] = None  # Optional: Webex meeting ID for exact meeting
-
-
-class ProcessTranscriptsResponse(BaseModel):
-    llm_response: str
-    unique_speakers: List[str]
-    meeting_uuid: str  # Internal database UUID
-    meeting_id: str  # Webex meeting ID
-    transcript_count: int
-
-
-class TranscriptItem(BaseModel):
-    speaker_name: str
-    transcript_text: str
-    start_time: datetime
-    end_time: datetime
-
-
-class GetTranscriptsRequest(BaseModel):
-    meeting_link: str
-    meeting_id: Optional[str] = None  # Optional: Webex meeting ID for exact meeting
-
-
-class GetTranscriptsResponse(BaseModel):
-    transcripts: List[TranscriptItem]
-    unique_speakers: List[str]
-    meeting_uuid: str  # Internal database UUID
-    meeting_id: str  # Webex meeting ID
-    transcript_count: int
-
-
-# ============================================================================
 # FRONTEND API SCHEMAS
 # ============================================================================
 

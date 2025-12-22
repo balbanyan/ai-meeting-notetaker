@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from typing import List
+from typing import Dict, Any
 from app.core.database import get_db, SessionLocal
-from app.core.auth import verify_bot_token
+from app.core.auth import verify_bot_token, decode_jwt_token, check_meeting_access
 from app.core.config import settings
 from app.models.screenshare_capture import ScreenshareCapture
 from app.models.audio_chunk import AudioChunk
@@ -14,18 +14,6 @@ import logging
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-class ScreenshotResponse(BaseModel):
-    id: str
-    meeting_id: str
-    chunk_id: int
-    analysis_status: str
-    captured_at: str
-    created_at: str
-    
-    class Config:
-        from_attributes = True
 
 
 class SaveScreenshotResponse(BaseModel):
@@ -180,27 +168,37 @@ async def analyze_screenshot_async(screenshot_uuid: str, vision_service):
         db.close()  # Release after ~20ms
 
 
-@router.get("/screenshots/{meeting_id}", response_model=List[ScreenshotResponse])
-async def get_screenshots(meeting_id: str, db: Session = Depends(get_db)):
-    """Get all screenshots for a meeting (for debugging)"""
-    screenshots = db.query(ScreenshareCapture).filter(
-        ScreenshareCapture.meeting_id == meeting_id
-    ).all()
-    return screenshots
-
-
 @router.get("/screenshots/image/{screenshot_id}")
-async def get_screenshot_image(screenshot_id: str, db: Session = Depends(get_db)):
+async def get_screenshot_image(
+    screenshot_id: str,
+    db: Session = Depends(get_db),
+    user: Dict[str, Any] = Depends(decode_jwt_token)
+):
     """
     Serve screenshot PNG image by ID.
     Used by external applications to fetch screenshot images via URL reference.
+    
+    Requires JWT authentication. User must have access to the meeting
+    that the screenshot belongs to.
     """
+    user_email = user.get("email", "")
+    
     screenshot = db.query(ScreenshareCapture).filter(
         ScreenshareCapture.id == screenshot_id
     ).first()
     
     if not screenshot:
         raise HTTPException(status_code=404, detail="Screenshot not found")
+    
+    # Get the meeting to check access
+    meeting = db.query(Meeting).filter(Meeting.id == screenshot.meeting_id).first()
+    
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    # Check user has access to this meeting
+    if not check_meeting_access(user_email, meeting):
+        raise HTTPException(status_code=403, detail="Access denied to this screenshot")
     
     if not screenshot.screenshot_image:
         raise HTTPException(status_code=404, detail="Screenshot image data not available")

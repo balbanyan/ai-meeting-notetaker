@@ -1,25 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from sqlalchemy.orm import Session
-from typing import List
 from app.core.database import get_db
 from app.core.auth import verify_bot_token
 from app.models.audio_chunk import AudioChunk
 from pydantic import BaseModel
 
 router = APIRouter()
-
-
-class AudioChunkResponse(BaseModel):
-    id: str  # UUID now
-    meeting_id: str
-    chunk_id: int  # Sequential chunk number
-    transcription_status: str  # "ready", "processing", "completed", "failed"
-    host_email: str = None
-    created_at: str
-    updated_at: str
-    
-    class Config:
-        from_attributes = True
 
 
 class SaveChunkResponse(BaseModel):
@@ -126,10 +112,3 @@ async def get_meeting_chunk_count(meeting_id: str, db: Session = Depends(get_db)
     except Exception as e:
         print(f"❌ CHUNK COUNT FAILED - {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get chunk count: {str(e)}")
-
-
-@router.get("/audio/chunks/{meeting_id}", response_model=List[AudioChunkResponse])
-async def get_audio_chunks(meeting_id: str, db: Session = Depends(get_db)):
-    """Get all audio chunks for a meeting (for debugging)"""
-    chunks = db.query(AudioChunk).filter(AudioChunk.meeting_id == meeting_id).all()
-    return chunks
