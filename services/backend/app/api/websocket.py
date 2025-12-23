@@ -298,20 +298,163 @@ def resolve_meeting_from_link(link: str, db) -> Meeting:
     return meeting
 
 
-@router.websocket("/ws/meeting")
-async def websocket_meeting_endpoint(websocket: WebSocket):
+# ========== TEMPORARILY DISABLED: JWT AUTH VERSION ==========
+# @router.websocket("/ws/meeting")
+# async def websocket_meeting_endpoint(websocket: WebSocket):
+#     """
+#     Secure WebSocket endpoint for real-time meeting updates.
+#     
+#     Connection Flow:
+#     1. Client connects to /ws/meeting (no sensitive data in URL)
+#     2. Client sends auth message within 10 seconds:
+#        {"type": "auth", "token": "jwt_token", "meeting_id": "uuid"}
+#        OR
+#        {"type": "auth", "token": "jwt_token", "meeting_link": "https://..."}
+#     3. Server validates JWT and checks meeting access
+#     4. On success: {"type": "auth_success", "meeting_id": "uuid", "user": {...}}
+#     5. Proceed with normal message handling (transcripts, summaries, status)
+#     
+#     Clients receive:
+#     - New transcript segments as they're created
+#     - Meeting summaries
+#     - Non-voting assistant responses
+#     - Meeting status changes (is_active updates)
+#     """
+#     await websocket.accept()
+#     meeting_id = None
+#     
+#     try:
+#         # Wait for auth message (10 second timeout)
+#         try:
+#             auth_data = await asyncio.wait_for(
+#                 websocket.receive_json(),
+#                 timeout=10.0
+#             )
+#         except asyncio.TimeoutError:
+#             logger.warning("WebSocket auth timeout")
+#             await websocket.close(code=1008, reason="Authentication timeout")
+#             return
+#         
+#         # Validate auth message format
+#         if auth_data.get("type") != "auth":
+#             await websocket.close(code=1008, reason="First message must be authentication")
+#             return
+#         
+#         token = auth_data.get("token")
+#         if not token:
+#             await websocket.close(code=1008, reason="Missing token")
+#             return
+#         
+#         # Validate JWT token
+#         try:
+#             user_info = decode_jwt_token_raw(token)
+#         except ValueError as e:
+#             error_msg = str(e)
+#             logger.warning(f"WebSocket JWT validation failed: {error_msg}")
+#             await websocket.close(code=1008, reason=error_msg)
+#             return
+#         
+#         user_email = user_info.get("email", "")
+#         logger.info(f"🔐 WebSocket authenticated: {user_email}")
+#         
+#         # Resolve meeting from meeting_id or meeting_link
+#         db = SessionLocal()
+#         meeting = None
+#         
+#         try:
+#             if "meeting_id" in auth_data:
+#                 # Direct UUID lookup
+#                 import uuid
+#                 try:
+#                     uuid_obj = uuid.UUID(auth_data["meeting_id"])
+#                     meeting = db.query(Meeting).filter(Meeting.id == uuid_obj).first()
+#                 except ValueError:
+#                     await websocket.close(code=1008, reason="Invalid meeting ID format")
+#                     return
+#                     
+#             elif "meeting_link" in auth_data:
+#                 # Resolve from link
+#                 meeting = resolve_meeting_from_link(auth_data["meeting_link"], db)
+#             else:
+#                 await websocket.close(code=1008, reason="Must provide meeting_id or meeting_link")
+#                 return
+#             
+#             if not meeting:
+#                 await websocket.close(code=1008, reason="Meeting not found")
+#                 return
+#             
+#             # Check user access
+#             if not check_meeting_access(user_email, meeting):
+#                 logger.warning(f"WebSocket access denied for {user_email} to meeting {meeting.id}")
+#                 await websocket.close(code=1008, reason="Access denied")
+#                 return
+#             
+#             meeting_id = str(meeting.id)
+#             
+#         finally:
+#             db.close()
+#         
+#         # Register connection to meeting room
+#         manager.register(websocket, meeting_id)
+#         
+#         # Send auth success response
+#         await websocket.send_json({
+#             "type": "auth_success",
+#                 "meeting_id": meeting_id,
+#             "user": {
+#                 "email": user_info.get("email"),
+#                 "name": user_info.get("name")
+#             }
+#         })
+#         
+#         logger.info(f"✅ WebSocket connected to meeting {meeting_id} for user {user_email}")
+#         
+#         # Keep connection alive and handle incoming messages
+#         while True:
+#             try:
+#                 data = await websocket.receive_text()
+#                 
+#                 # Handle ping/pong for keepalive
+#                 if data == "ping":
+#                     await websocket.send_json({"type": "pong"})
+#                     
+#             except WebSocketDisconnect:
+#                 logger.info(f"WebSocket disconnected gracefully for meeting {meeting_id}")
+#                 break
+#             except Exception as e:
+#                 logger.error(f"Error in WebSocket loop for meeting {meeting_id}: {str(e)}")
+#                 break
+#                 
+#     except WebSocketDisconnect:
+#         logger.info("WebSocket disconnected during auth")
+#     except Exception as e:
+#         logger.error(f"WebSocket error: {str(e)}")
+#         try:
+#             await websocket.close(code=1011, reason="Internal error")
+#         except:
+#             pass
+#     finally:
+#         if meeting_id:
+#             manager.disconnect(websocket, meeting_id)
+# ========== END TEMPORARILY DISABLED ==========
+
+
+# ========== TEMPORARY: NO-AUTH VERSION ==========
+@router.websocket("/ws/meeting/{meeting_identifier}")
+async def websocket_meeting_no_auth(websocket: WebSocket, meeting_identifier: str):
     """
-    Secure WebSocket endpoint for real-time meeting updates.
+    WebSocket endpoint for real-time meeting updates.
+    
+    [TEMPORARILY DISABLED] JWT authentication is currently disabled.
+    To restore auth, uncomment the JWT version above and remove this endpoint.
     
     Connection Flow:
-    1. Client connects to /ws/meeting (no sensitive data in URL)
-    2. Client sends auth message within 10 seconds:
-       {"type": "auth", "token": "jwt_token", "meeting_id": "uuid"}
-       OR
-       {"type": "auth", "token": "jwt_token", "meeting_link": "https://..."}
-    3. Server validates JWT and checks meeting access
-    4. On success: {"type": "auth_success", "meeting_id": "uuid", "user": {...}}
-    5. Proceed with normal message handling (transcripts, summaries, status)
+    1. Client connects to /ws/meeting/{meeting_identifier}
+       - meeting_identifier can be a UUID or URL-encoded meeting link
+    2. [TEMPORARILY DISABLED] Client sends auth message within 10 seconds
+    3. [TEMPORARILY DISABLED] Server validates JWT and checks meeting access
+    4. Server resolves meeting and registers connection
+    5. Client receives real-time updates
     
     Clients receive:
     - New transcript segments as they're created
@@ -323,69 +466,27 @@ async def websocket_meeting_endpoint(websocket: WebSocket):
     meeting_id = None
     
     try:
-        # Wait for auth message (10 second timeout)
-        try:
-            auth_data = await asyncio.wait_for(
-                websocket.receive_json(),
-                timeout=10.0
-            )
-        except asyncio.TimeoutError:
-            logger.warning("WebSocket auth timeout")
-            await websocket.close(code=1008, reason="Authentication timeout")
-            return
-        
-        # Validate auth message format
-        if auth_data.get("type") != "auth":
-            await websocket.close(code=1008, reason="First message must be authentication")
-            return
-        
-        token = auth_data.get("token")
-        if not token:
-            await websocket.close(code=1008, reason="Missing token")
-            return
-        
-        # Validate JWT token
-        try:
-            user_info = decode_jwt_token_raw(token)
-        except ValueError as e:
-            error_msg = str(e)
-            logger.warning(f"WebSocket JWT validation failed: {error_msg}")
-            await websocket.close(code=1008, reason=error_msg)
-            return
-        
-        user_email = user_info.get("email", "")
-        logger.info(f"🔐 WebSocket authenticated: {user_email}")
-        
-        # Resolve meeting from meeting_id or meeting_link
+        # Resolve meeting from identifier (UUID or link)
         db = SessionLocal()
         meeting = None
         
         try:
-            if "meeting_id" in auth_data:
-                # Direct UUID lookup
-                import uuid
-                try:
-                    uuid_obj = uuid.UUID(auth_data["meeting_id"])
-                    meeting = db.query(Meeting).filter(Meeting.id == uuid_obj).first()
-                except ValueError:
-                    await websocket.close(code=1008, reason="Invalid meeting ID format")
-                    return
-                    
-            elif "meeting_link" in auth_data:
-                # Resolve from link
-                meeting = resolve_meeting_from_link(auth_data["meeting_link"], db)
-            else:
-                await websocket.close(code=1008, reason="Must provide meeting_id or meeting_link")
-                return
+            # Try as UUID first
+            import uuid as uuid_module
+            try:
+                uuid_obj = uuid_module.UUID(meeting_identifier)
+                meeting = db.query(Meeting).filter(Meeting.id == uuid_obj).first()
+                logger.info(f"🔍 Resolved meeting by UUID: {meeting_identifier}")
+            except ValueError:
+                # Not a UUID, try as meeting link (URL-decode it)
+                from urllib.parse import unquote
+                decoded_link = unquote(meeting_identifier)
+                meeting = resolve_meeting_from_link(decoded_link, db)
+                logger.info(f"🔍 Resolved meeting by link: {decoded_link}")
             
             if not meeting:
+                logger.warning(f"Meeting not found for identifier: {meeting_identifier}")
                 await websocket.close(code=1008, reason="Meeting not found")
-                return
-            
-            # Check user access
-            if not check_meeting_access(user_email, meeting):
-                logger.warning(f"WebSocket access denied for {user_email} to meeting {meeting.id}")
-                await websocket.close(code=1008, reason="Access denied")
                 return
             
             meeting_id = str(meeting.id)
@@ -396,17 +497,13 @@ async def websocket_meeting_endpoint(websocket: WebSocket):
         # Register connection to meeting room
         manager.register(websocket, meeting_id)
         
-        # Send auth success response
+        # Send connection success response
         await websocket.send_json({
-            "type": "auth_success",
-            "meeting_id": meeting_id,
-            "user": {
-                "email": user_info.get("email"),
-                "name": user_info.get("name")
-            }
+            "type": "connected",
+            "meeting_id": meeting_id
         })
         
-        logger.info(f"✅ WebSocket connected to meeting {meeting_id} for user {user_email}")
+        logger.info(f"✅ WebSocket connected to meeting {meeting_id} (no-auth mode)")
         
         # Keep connection alive and handle incoming messages
         while True:
@@ -425,7 +522,7 @@ async def websocket_meeting_endpoint(websocket: WebSocket):
                 break
                 
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected during auth")
+        logger.info("WebSocket disconnected during setup")
     except Exception as e:
         logger.error(f"WebSocket error: {str(e)}")
         try:
@@ -435,6 +532,57 @@ async def websocket_meeting_endpoint(websocket: WebSocket):
     finally:
         if meeting_id:
             manager.disconnect(websocket, meeting_id)
+# ========== END TEMPORARY ==========
+
+
+@router.websocket("/ws/meeting-status/{meeting_id}")
+async def websocket_meeting_status(websocket: WebSocket, meeting_id: str):
+    """
+    Simple WebSocket endpoint for meeting status updates (embedded app).
+    
+    No authentication required - only broadcasts non-sensitive is_active boolean.
+    Sends current status immediately on connect, then receives real-time updates.
+    
+    Connection Flow:
+    1. Client connects to /ws/meeting-status/{meeting_id}
+    2. Server immediately sends current status
+    3. Client receives real-time status updates when bot joins/leaves
+    """
+    await websocket.accept()
+    
+    # Get and send current status immediately
+    db = SessionLocal()
+    try:
+        meeting = db.query(Meeting).filter(
+            Meeting.original_webex_meeting_id == meeting_id
+        ).order_by(Meeting.created_at.desc()).first()
+        current_status = meeting.is_active if meeting else False
+    finally:
+        db.close()
+    
+    # Send current status immediately
+    await websocket.send_json({
+        "type": "status",
+        "data": {"meeting_id": meeting_id, "is_active": current_status}
+    })
+    
+    logger.info(f"🔌 Meeting status WebSocket connected for {meeting_id} (current status: {current_status})")
+    
+    # Register for future status updates
+    manager.register(websocket, meeting_id)
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # Handle ping/pong for keepalive
+            if data == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        logger.info(f"Meeting status WebSocket disconnected for {meeting_id}")
+    except Exception as e:
+        logger.error(f"Meeting status WebSocket error for {meeting_id}: {str(e)}")
+    finally:
+        manager.disconnect(websocket, meeting_id)
 
 
 @router.get("/ws/stats")

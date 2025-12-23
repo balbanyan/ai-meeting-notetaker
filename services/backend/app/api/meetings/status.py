@@ -241,13 +241,15 @@ async def update_meeting_status(
         status_text = "active" if request.is_active else "inactive"
         print(f"✅ Meeting {meeting_uuid} marked as {status_text}")
         
-        # Broadcast status change to WebSocket subscribers (both IDs)
+        # Broadcast status change to WebSocket subscribers (all IDs)
         try:
             from app.api.websocket import manager
             await manager.broadcast_status(meeting_uuid, request.is_active)  # UUID
-            if meeting.webex_meeting_id:
-                await manager.broadcast_status(meeting.webex_meeting_id, request.is_active)  # Webex ID
-            print(f"📡 Broadcast status change via WebSocket: {status_text} (UUID + Webex ID)")
+            if meeting.original_webex_meeting_id:
+                await manager.broadcast_status(meeting.original_webex_meeting_id, request.is_active)  # Original Webex ID (embedded app)
+            if meeting.webex_meeting_id and meeting.webex_meeting_id != meeting.original_webex_meeting_id:
+                await manager.broadcast_status(meeting.webex_meeting_id, request.is_active)  # Webex ID (may be timestamped)
+            print(f"📡 Broadcast status change via WebSocket: {status_text} (UUID + Original Webex ID + Webex ID)")
         except Exception as ws_error:
             # Log error but don't fail the workflow
             print(f"⚠️ Failed to broadcast status via WebSocket: {str(ws_error)}")

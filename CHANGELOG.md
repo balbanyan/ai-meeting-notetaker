@@ -6,6 +6,77 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.7.1] - 2025-12-23
+
+### Changed
+- **[TEMPORARY] WebSocket Authentication Disabled**: JWT auth temporarily disabled for testing
+  - Old endpoint `/ws/meeting` (JWT first-message auth) commented out
+  - New temporary endpoint: `/ws/meeting/{meeting_identifier}` (no auth required)
+  - `meeting_identifier` can be a UUID or URL-encoded meeting link
+  - Original JWT code preserved with `TEMPORARILY DISABLED` markers for easy restoration
+
+- **[TEMPORARY] Screenshot API Authentication Disabled**: JWT auth temporarily disabled
+  - `GET /api/screenshots/image/{screenshot_id}` no longer requires JWT token
+  - Access check bypassed (returns image directly)
+  - Original auth code preserved with `TEMPORARILY DISABLED` markers
+
+### Technical Notes
+- To restore JWT auth: search for `TEMPORARILY DISABLED` comments in:
+  - `app/api/websocket.py` - uncomment JWT endpoint, remove no-auth version
+  - `app/api/screenshots.py` - uncomment `Depends(decode_jwt_token)` and access check
+
+---
+
+## [2.7.0] - 2025-12-23
+
+### Added
+- **Complete Embedded App UI Redesign**: Modern dark theme matching design guidelines
+  - New 3D animated logo with "NOTETAKER" title and subheader
+  - Effra font family (Light, Regular, Medium weights) for typography
+  - Card-based layout for meeting information and classification
+  - Meeting classification with "Private" and "Shared" radio options
+  - Improved meeting ID display with subtle divider separator
+  - Fun rotating loading messages during bot join (15 seconds in dev mode)
+
+- **New WebSocket Endpoint for Embedded App**: `/ws/meeting-status/{meeting_id}`
+  - Dedicated status WebSocket for embedded app (no JWT required)
+  - Sends current status immediately on connection
+  - Subscribes to real-time status updates using `original_webex_meeting_id`
+  - Simplified frontend WebSocket client
+
+- **Font Assets**: Added Effra font files to frontend assets
+  - `Effra-Light.ttf`
+  - `Effra-Regular.ttf`
+  - `Effra-Medium.ttf`
+
+### Changed
+- **Embedded App Dev Mode**: Now mirrors production UI exactly
+  - Inline meeting ID input placeholder instead of separate input field
+  - Simulates successful bot join (15 seconds) without calling real API
+  - Classification options disabled during loading
+
+- **Meeting Status Endpoint**: Removed `verify_bot_token` from `GET /api/meetings/status/{meeting_identifier}`
+  - Endpoint now accessible without bot token for embedded app use
+  - Still queries by `original_webex_meeting_id` for correct matching
+
+- **Status Broadcasting**: Backend now broadcasts to `original_webex_meeting_id`
+  - Ensures embedded app receives status updates
+  - Broadcasts to both `original_webex_meeting_id` and `webex_meeting_id` if different
+
+- **UI/UX Improvements**:
+  - Classification options disabled when bot is active or loading
+  - Spinner animation now works (added missing `@keyframes spin`)
+  - Meeting card footer with compact ID display
+  - Responsive button states with loading spinner and text
+
+### Technical Details
+- Frontend WebSocket client simplified to single `connectToMeetingStatus()` function
+- Backend WebSocket manager registers connections by meeting ID for targeted broadcasts
+- CSS uses HSL color values with dark green theme palette
+- Cards use subtle borders and shadows for depth
+
+---
+
 ## [2.6.1] - 2025-12-22
 
 ### Added

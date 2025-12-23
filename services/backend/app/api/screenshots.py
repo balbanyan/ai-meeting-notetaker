@@ -172,16 +172,20 @@ async def analyze_screenshot_async(screenshot_uuid: str, vision_service):
 async def get_screenshot_image(
     screenshot_id: str,
     db: Session = Depends(get_db),
-    user: Dict[str, Any] = Depends(decode_jwt_token)
+    # ========== TEMPORARILY DISABLED: JWT AUTH ==========
+    # user: Dict[str, Any] = Depends(decode_jwt_token)
+    # ========== END TEMPORARILY DISABLED ==========
 ):
     """
     Serve screenshot PNG image by ID.
     Used by external applications to fetch screenshot images via URL reference.
     
-    Requires JWT authentication. User must have access to the meeting
-    that the screenshot belongs to.
+    NOTE: JWT authentication temporarily disabled.
+    To restore, uncomment the user dependency and access check below.
     """
-    user_email = user.get("email", "")
+    # ========== TEMPORARILY DISABLED: ACCESS CHECK ==========
+    # user_email = user.get("email", "")
+    # ========== END TEMPORARILY DISABLED ==========
     
     screenshot = db.query(ScreenshareCapture).filter(
         ScreenshareCapture.id == screenshot_id
@@ -190,15 +194,17 @@ async def get_screenshot_image(
     if not screenshot:
         raise HTTPException(status_code=404, detail="Screenshot not found")
     
-    # Get the meeting to check access
-    meeting = db.query(Meeting).filter(Meeting.id == screenshot.meeting_id).first()
-    
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Meeting not found")
-    
-    # Check user has access to this meeting
-    if not check_meeting_access(user_email, meeting):
-        raise HTTPException(status_code=403, detail="Access denied to this screenshot")
+    # ========== TEMPORARILY DISABLED: MEETING ACCESS CHECK ==========
+    # # Get the meeting to check access
+    # meeting = db.query(Meeting).filter(Meeting.id == screenshot.meeting_id).first()
+    # 
+    # if not meeting:
+    #     raise HTTPException(status_code=404, detail="Meeting not found")
+    # 
+    # # Check user has access to this meeting
+    # if not check_meeting_access(user_email, meeting):
+    #     raise HTTPException(status_code=403, detail="Access denied to this screenshot")
+    # ========== END TEMPORARILY DISABLED ==========
     
     if not screenshot.screenshot_image:
         raise HTTPException(status_code=404, detail="Screenshot image data not available")

@@ -11,12 +11,14 @@ class RegisterAndJoinRequest(BaseModel):
     meeting_id: str  # Webex meeting ID from SDK
     enable_non_voting: Optional[bool] = None  # Enable non-voting assistant (overrides .env if provided)
     non_voting_call_frequency: Optional[int] = None  # Chunks between calls (overrides .env if provided)
+    classification: Optional[str] = "shared"  # Access classification: "private" (host only) or "shared" (all participants)
 
 
 class RegisterAndJoinWithLinkRequest(BaseModel):
     meeting_link: str  # Full Webex meeting URL
     enable_non_voting: Optional[bool] = None  # Enable non-voting assistant (overrides .env if provided)
     non_voting_call_frequency: Optional[int] = None  # Chunks between calls (overrides .env if provided)
+    classification: Optional[str] = "shared"  # Access classification: "private" (host only) or "shared" (all participants)
 
 
 class RegisterAndJoinResponse(BaseModel):

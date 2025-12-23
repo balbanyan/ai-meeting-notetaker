@@ -199,6 +199,9 @@ async def register_and_join_meeting(
             existing_meeting.non_voting_enabled = request.enable_non_voting if request.enable_non_voting is not None else settings.enable_non_voting
             existing_meeting.non_voting_call_frequency = request.non_voting_call_frequency if request.non_voting_call_frequency is not None else settings.non_voting_call_frequency
             
+            # Access classification (private = host only, shared = all participants)
+            existing_meeting.classification = request.classification or "shared"
+            
             db.commit()
             db.refresh(existing_meeting)
             
@@ -232,7 +235,9 @@ async def register_and_join_meeting(
                 # Non-voting and screenshot settings (API parameters override .env if provided)
                 screenshots_enabled=settings.enable_screenshots,
                 non_voting_enabled=request.enable_non_voting if request.enable_non_voting is not None else settings.enable_non_voting,
-                non_voting_call_frequency=request.non_voting_call_frequency if request.non_voting_call_frequency is not None else settings.non_voting_call_frequency
+                non_voting_call_frequency=request.non_voting_call_frequency if request.non_voting_call_frequency is not None else settings.non_voting_call_frequency,
+                # Access classification (private = host only, shared = all participants)
+                classification=request.classification or "shared"
             )
             
             db.add(new_meeting)
@@ -485,6 +490,8 @@ async def register_and_join_meeting_with_link(
             # API parameters override .env if provided, otherwise use .env
             existing_meeting.non_voting_enabled = request.enable_non_voting if request.enable_non_voting is not None else settings.enable_non_voting
             existing_meeting.non_voting_call_frequency = request.non_voting_call_frequency if request.non_voting_call_frequency is not None else settings.non_voting_call_frequency
+            # Access classification (private = host only, shared = all participants)
+            existing_meeting.classification = request.classification or "shared"
             existing_meeting.is_active = True
             # Only set actual_join_time on first join, not on rejoins
             if not existing_meeting.actual_join_time:
@@ -512,6 +519,8 @@ async def register_and_join_meeting_with_link(
                 # API parameters override .env if provided, otherwise use .env
                 non_voting_enabled=request.enable_non_voting if request.enable_non_voting is not None else settings.enable_non_voting,
                 non_voting_call_frequency=request.non_voting_call_frequency if request.non_voting_call_frequency is not None else settings.non_voting_call_frequency,
+                # Access classification (private = host only, shared = all participants)
+                classification=request.classification or "shared",
                 is_active=True,
                 actual_join_time=datetime.utcnow()
             )

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import case, desc, or_
+from sqlalchemy import case, desc
 from typing import Dict, Any
 import uuid
 from app.core.database import get_db
@@ -19,7 +19,7 @@ router = APIRouter()
 
 
 # ============================================================================
-# FRONTEND API ENDPOINTS - Meeting List & Details (JWT Protected)
+# FRONTEND API ENDPOINTS - Meeting List & Details
 # ============================================================================
 
 
@@ -48,17 +48,9 @@ async def list_meetings(
         user_email = user.get("email", "").lower()
         print(f"📋 LIST MEETINGS: fetching meetings for user {user_email}")
         
-        # Query meetings where user has access
-        # Filter by: user email appears in any email column
-        meetings = db.query(Meeting).filter(
-            or_(
-                Meeting.host_email.ilike(user_email),
-                Meeting.invitees_emails.contains([user_email]),
-                Meeting.cohost_emails.contains([user_email]),
-                Meeting.participants_emails.contains([user_email]),
-                Meeting.shared_with.contains([user_email])
-            )
-        ).order_by(
+        # Query all meetings and filter in Python using check_meeting_access
+        # This is more reliable than SQL JSON queries which have compatibility issues
+        all_meetings = db.query(Meeting).order_by(
             # First, sort by is_active (True first, False second)
             desc(Meeting.is_active),
             # Then within each group, sort by appropriate time
@@ -68,27 +60,8 @@ async def list_meetings(
             ))
         ).all()
         
-        # Additional filter in Python for case-insensitive check on JSON arrays
-        # (SQLAlchemy JSON contains may not handle case-insensitivity well)
-        filtered_meetings = []
-        for meeting in meetings:
-            if check_meeting_access(user_email, meeting):
-                filtered_meetings.append(meeting)
-        
-        # If SQL filter didn't work well, query all and filter in Python
-        if not filtered_meetings and not meetings:
-            # Fallback: query all meetings and filter in Python
-            all_meetings = db.query(Meeting).order_by(
-                desc(Meeting.is_active),
-                desc(case(
-                    (Meeting.is_active == True, Meeting.actual_join_time),
-                    else_=Meeting.actual_leave_time
-                ))
-            ).all()
-            
-            filtered_meetings = [m for m in all_meetings if check_meeting_access(user_email, m)]
-        elif not filtered_meetings:
-            filtered_meetings = [m for m in meetings if check_meeting_access(user_email, m)]
+        # Filter meetings where user has access (case-insensitive email matching)
+        filtered_meetings = [m for m in all_meetings if check_meeting_access(user_email, m)]
         
         active_count = sum(1 for m in filtered_meetings if m.is_active)
         completed_count = len(filtered_meetings) - active_count
@@ -139,8 +112,7 @@ async def list_meetings(
 @router.get("/meetings/status/{meeting_identifier}", response_model=MeetingStatusResponse)
 async def get_meeting_status(
     meeting_identifier: str,
-    db: Session = Depends(get_db),
-    user: Dict[str, Any] = Depends(decode_jwt_token)
+    db: Session = Depends(get_db)
 ):
     """
     Check if a bot is active for a meeting.
@@ -150,13 +122,11 @@ async def get_meeting_status(
     - Webex meeting ID: Checks original_webex_meeting_id (matches embedded app meeting ID)
     
     Returns simple status response with is_active boolean.
-    Returns 403 if user doesn't have access to the meeting.
     
-    Requires JWT authentication.
+    No authentication required - only returns non-sensitive is_active boolean.
     """
     try:
-        user_email = user.get("email", "")
-        print(f"🔍 GET MEETING STATUS: {meeting_identifier} (user: {user_email})")
+        print(f"🔍 GET MEETING STATUS: {meeting_identifier}")
         
         meeting = None
         
@@ -173,10 +143,6 @@ async def get_meeting_status(
         
         if not meeting:
             raise HTTPException(status_code=404, detail="Meeting not found")
-        
-        # Check user access
-        if not check_meeting_access(user_email, meeting):
-            raise HTTPException(status_code=403, detail="Access denied to this meeting")
         
         is_active = meeting.is_active
         print(f"✅ Meeting status: {'active' if is_active else 'inactive'}")

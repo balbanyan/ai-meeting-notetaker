@@ -122,14 +122,16 @@ def decode_jwt_token_raw(token: str) -> Dict[str, Any]:
 
 def check_meeting_access(user_email: str, meeting) -> bool:
     """
-    Check if a user has access to a meeting.
+    Check if a user has access to a meeting based on classification.
     
-    A user has access if their email appears in any of these meeting fields:
-    - host_email (single email)
-    - invitees_emails (list)
-    - cohost_emails (list)
-    - participants_emails (list)
-    - shared_with (list)
+    Classification rules:
+    - "private": Only the host_email can access the meeting
+    - "shared" (default): User can access if their email appears in any of:
+      - host_email (single email)
+      - invitees_emails (list)
+      - cohost_emails (list)
+      - participants_emails (list)
+      - shared_with (list)
     
     Args:
         user_email: Email of the user to check
@@ -144,10 +146,16 @@ def check_meeting_access(user_email: str, meeting) -> bool:
     # Normalize email for comparison (case-insensitive)
     user_email_lower = user_email.lower()
     
-    # Check host_email
-    if meeting.host_email and meeting.host_email.lower() == user_email_lower:
+    # Check host_email (always has access regardless of classification)
+    is_host = meeting.host_email and meeting.host_email.lower() == user_email_lower
+    if is_host:
         return True
     
+    # Private classification: Only host can access (already checked above)
+    if meeting.classification == "private":
+        return False
+    
+    # Shared classification (default): Check all allowed lists
     # Check invitees_emails (JSON list)
     if meeting.invitees_emails:
         if any(email.lower() == user_email_lower for email in meeting.invitees_emails):

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { registerAndJoinMeeting, getMeetingStatus } from '../api/client'
-import { connectToMeeting } from '../api/websocket'
+import { connectToMeetingStatus } from '../api/websocket'
+import Logo3D from '../assets/images/3DLogo.svg'
 
-// Funny loading messages
+// Loading messages
 const loadingMessages = [
   "Teaching robot to look busy during long presentations...",
   "AI is learning to distinguish 'let's circle back' from 'no'...",
@@ -20,16 +21,55 @@ const loadingMessages = [
   "Teaching bot to say 'Good question' while Googling furiously..."
 ]
 
-// Get random loading message
 const getRandomLoadingMessage = () => {
   return loadingMessages[Math.floor(Math.random() * loadingMessages.length)]
 }
 
+// Icons
+const LockIcon = () => (
+  <svg className="radio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+  </svg>
+)
+
+const UsersIcon = () => (
+  <svg className="radio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+    <circle cx="9" cy="7" r="4"/>
+    <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+  </svg>
+)
+
+const SparklesIcon = () => (
+  <svg className="button-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+    <path d="M5 3v4"/>
+    <path d="M19 17v4"/>
+    <path d="M3 5h4"/>
+    <path d="M17 19h4"/>
+  </svg>
+)
+
+const CheckCircleIcon = () => (
+  <svg className="status-icon status-icon-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <path d="m9 12 2 2 4-4"/>
+  </svg>
+)
+
+const AlertCircleIcon = () => (
+  <svg className="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <line x1="12" x2="12" y1="8" y2="12"/>
+    <line x1="12" x2="12.01" y1="16" y2="16"/>
+  </svg>
+)
+
 function EmbeddedApp() {
-  // Check if dev mode is enabled
-  const isDev = import.meta.env.VITE_DEV_MODE === 'true'
+  const isDev = import.meta.env.VITE_DEV_MODE === 'false'
   
-  const [webexApp, setWebexApp] = useState(null)
   const [meetingData, setMeetingData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -38,24 +78,25 @@ function EmbeddedApp() {
   const [loadingMessage, setLoadingMessage] = useState('')
   const [isBotActive, setIsBotActive] = useState(false)
   const [checkingStatus, setCheckingStatus] = useState(true)
-  const websocketRef = useRef(null)
-  
-  // Dev mode: Manual meeting ID input
+  const [classification, setClassification] = useState(null)
   const [manualMeetingId, setManualMeetingId] = useState('')
+  const websocketRef = useRef(null)
 
   useEffect(() => {
-    // DEV MODE: Skip Webex SDK initialization
     if (isDev) {
-      console.log('🔧 Running in DEV MODE - Webex SDK disabled')
+      console.log('Running in DEV MODE - Webex SDK disabled')
+      setMeetingData({
+        id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        conferenceId: 'CONF-98765',
+        title: 'Weekly Team Sync'
+      })
       setLoading(false)
       setCheckingStatus(false)
       return
     }
     
-    // PRODUCTION MODE: Initialize Webex SDK
     const initializeWebex = async () => {
       try {
-        // Wait for SDK to be available
         if (!window.webex) {
           console.error('Webex SDK not loaded')
           setError('Webex SDK not loaded. Please refresh the page.')
@@ -65,30 +106,20 @@ function EmbeddedApp() {
         }
 
         const app = new window.webex.Application()
-        
         await app.onReady()
         console.log('Webex App ready', app)
         
-        setWebexApp(app)
-        
-        // Get meeting data from SDK using the proper API method
         try {
           const meeting = await app.context.getMeeting()
           console.log('Meeting data:', meeting)
           
-          const meetingInfo = {
+          setMeetingData({
             id: meeting.id,
             conferenceId: meeting.conferenceId,
             title: meeting.title,
-            // Note: startTime, endTime, meetingType may not be available from SDK
-            // Backend will fetch these from Webex API using the meeting ID
-          }
+          })
           
-          setMeetingData(meetingInfo)
-          
-          // Setup WebSocket to monitor meeting status
           setupWebSocket(meeting.id)
-          
           setLoading(false)
         } catch (meetingError) {
           console.warn('Could not get meeting data:', meetingError)
@@ -106,7 +137,6 @@ function EmbeddedApp() {
 
     initializeWebex()
     
-    // Cleanup WebSocket on unmount
     return () => {
       if (websocketRef.current) {
         websocketRef.current.disconnect()
@@ -116,50 +146,29 @@ function EmbeddedApp() {
   }, [isDev])
   
   const setupWebSocket = async (meetingId) => {
-    console.log('Setting up WebSocket for meeting status:', meetingId)
-    
-    // First, fetch the current meeting status
     try {
       const statusData = await getMeetingStatus(meetingId)
-      console.log('Initial meeting status:', statusData)
       setIsBotActive(statusData.is_active)
-    } catch (error) {
-      console.warn('Could not fetch initial meeting status:', error)
-      // Continue with WebSocket setup anyway
+    } catch (err) {
+      console.warn('Could not fetch initial meeting status:', err)
     } finally {
       setCheckingStatus(false)
     }
     
-    // Then setup WebSocket for real-time updates
-    websocketRef.current = connectToMeeting(meetingId, {
-      onConnected: () => {
-        console.log('WebSocket connected for status updates')
-      },
-      onStatus: (statusData) => {
-        console.log('Meeting status update:', statusData)
-        setIsBotActive(statusData.is_active)
-        
-        // Show success message when bot joins
-        if (statusData.is_active && joining) {
-          setSuccess(true)
-          setJoining(false)
-        }
-      },
-      onDisconnected: () => {
-        console.log('WebSocket disconnected')
-      },
-      onError: (error) => {
-        console.log('WebSocket error:', error)
+    websocketRef.current = connectToMeetingStatus(meetingId, (isActive) => {
+      setIsBotActive(isActive)
+      if (isActive && joining) {
+        setSuccess(true)
+        setJoining(false)
       }
     })
   }
 
   const handleAddBot = async () => {
-    // Get meeting ID based on mode
-    const meetingId = isDev ? manualMeetingId : meetingData?.id
+    const meetingId = isDev ? (manualMeetingId || meetingData?.id) : meetingData?.id
     
     if (!meetingId) {
-      setError(isDev ? 'Please enter a meeting ID' : 'No meeting data available')
+      setError('No meeting data available')
       return
     }
 
@@ -168,173 +177,219 @@ function EmbeddedApp() {
     setError(null)
     setSuccess(false)
 
-    // Cycle through messages every 5 seconds
     const messageInterval = setInterval(() => {
       setLoadingMessage(getRandomLoadingMessage())
     }, 5000)
 
     try {
-      // Send meeting ID to backend - it will fetch all metadata from Webex APIs
-      const response = await registerAndJoinMeeting({
-        meeting_id: meetingId
-      })
-
-      console.log('Bot join response:', response)
+      if (isDev) {
+        // Simulate join in dev mode
+        await new Promise(resolve => setTimeout(resolve, 15000))
+        console.log('Bot join simulated for meeting:', meetingId)
+      } else {
+        const response = await registerAndJoinMeeting({ 
+          meeting_id: meetingId,
+          classification: classification  // Pass selected classification (private or shared)
+        })
+        console.log('Bot join response:', response)
+      }
       setSuccess(true)
-      setError(null)
+      setIsBotActive(true)
     } catch (err) {
       console.error('Failed to add bot:', err)
       setError(err.message || 'Failed to add bot to meeting')
-      setSuccess(false)
     } finally {
       clearInterval(messageInterval)
       setJoining(false)
     }
   }
 
-  const formatDateTime = (dateTime) => {
-    if (!dateTime) return 'N/A'
-    try {
-      return new Date(dateTime).toLocaleString()
-    } catch {
-      return 'Invalid date'
-    }
-  }
-
+  // Loading screen
   if (loading) {
     return (
-      <div className="container">
-        <div className="loading">
-          <div className="spinner"></div>
-          <p>Initializing Webex SDK...</p>
+      <div className="loading-screen">
+        <div className="loading-content">
+          <div className="loading-spinner"></div>
+          <p className="loading-text">Initializing Webex SDK...</p>
         </div>
       </div>
     )
   }
 
-  if (error && !meetingData) {
+  // Error screen (only if no meeting data)
+  if (error && !meetingData && !isDev) {
     return (
-      <div className="container">
-        <div className="error-card">
-          <h2>Error</h2>
-          <p>{error}</p>
+      <div className="error-screen">
+        <div className="card error-card">
+          <div className="error-content">
+            <AlertCircleIcon />
+            <div>
+              <h2 className="error-title">Connection Error</h2>
+              <p className="error-message">{error}</p>
+            </div>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="container">
-      {isDev && <div className="dev-mode-badge">🔧 DEV MODE</div>}
+    <div className="app-container">
+      {isDev && <div className="dev-badge">Dev Mode</div>}
       
-      <header>
-        <h1>AI Space Notetaker</h1>
-        <p className="tagline">Add intelligent note-taking to your meeting</p>
-      </header>
+      <div className="app-content">
+        {/* Header */}
+        <header className="app-header">
+          <img src={Logo3D} alt="AI Space" className="header-logo" />
+          <span className="header-title">Notetaker</span>
+        </header>
 
-      {/* DEV MODE: Manual meeting ID input */}
-      {isDev && (
-        <div className="dev-input-section">
-          <h2>Manual Meeting Setup</h2>
-          <p className="dev-help-text">
-            Enter a Webex meeting ID to trigger the bot join workflow.
-            Backend will fetch metadata from Webex APIs.
-          </p>
-          <div className="input-group">
-            <label htmlFor="meeting-id">Meeting ID:</label>
-            <input
-              id="meeting-id"
-              type="text"
-              className="meeting-id-input"
-              placeholder="e.g., abc123xyz456..."
-              value={manualMeetingId}
-              onChange={(e) => setManualMeetingId(e.target.value)}
-              disabled={joining}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* PRODUCTION MODE: Meeting info from Webex SDK */}
-      {!isDev && meetingData && (
-        <div className="meeting-info">
-          <h2>Meeting Information</h2>
-          <div className="info-grid">
-            <div className="info-item">
-              <span className="label">Title:</span>
-              <span className="value">{meetingData.title || 'Untitled Meeting'}</span>
-            </div>
-            <div className="info-item">
-              <span className="label">Meeting ID:</span>
-              <span className="value mono">{meetingData.id}</span>
-            </div>
-            {meetingData.conferenceId && (
-              <div className="info-item">
-                <span className="label">Conference ID:</span>
-                <span className="value mono">{meetingData.conferenceId}</span>
+        {/* Meeting Card */}
+        {meetingData && (
+          <div className="card">
+            <div className="meeting-card-content">
+              <div className="meeting-card-header">
+                <div className="meeting-card-info">
+                  <p className="meeting-label">Current Meeting</p>
+                  <h2 className="meeting-title">
+                    {meetingData.title || 'Untitled Meeting'}
+                  </h2>
+                </div>
+                
+                {checkingStatus ? (
+                  <div className="badge badge-secondary">
+                    <span className="badge-spinner"></span>
+                    Checking
+                  </div>
+                ) : isBotActive ? (
+                  <div className="badge badge-primary">
+                    <span className="badge-dot"></span>
+                    Bot Active
+                  </div>
+                ) : null}
               </div>
-            )}
+              
+              <div className="meeting-footer-section">
+                <hr className="meeting-divider" />
+                <div className="meeting-id-footer">
+                  {isDev ? (
+                    <input
+                      type="text"
+                      className="meeting-id-input"
+                      placeholder="ID: Enter meeting ID to override..."
+                      value={manualMeetingId}
+                      onChange={(e) => setManualMeetingId(e.target.value)}
+                      disabled={joining}
+                    />
+                  ) : (
+                    <p className="meeting-id-text">
+                      ID: {meetingData.id}
+                      {meetingData.conferenceId && ` / ${meetingData.conferenceId}`}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Classification Card */}
+        <div className="card">
+          <div className="classification-content">
+            <div className="classification-header">
+              <label className="classification-title">
+                Meeting Classification <span className="classification-required">*</span>
+              </label>
+              <p className="classification-description">
+                Choose who can access the meeting notes
+              </p>
+            </div>
+            
+            <div className={`radio-group ${(isBotActive || joining) ? 'disabled' : ''}`}>
+              <div 
+                className={`radio-option ${classification === 'private' ? 'selected' : ''} ${(isBotActive || joining) ? 'disabled' : ''}`}
+                onClick={() => !(isBotActive || joining) && setClassification('private')}
+              >
+                <div className="radio-circle">
+                  <div className="radio-dot"></div>
+                </div>
+                <div className="radio-content">
+                  <div className="radio-label-row">
+                    <LockIcon />
+                    <span className="radio-label">Private</span>
+                  </div>
+                  <p className="radio-sublabel">Only the host can access notes</p>
+                </div>
+              </div>
+              
+              <div 
+                className={`radio-option ${classification === 'shared' ? 'selected' : ''} ${(isBotActive || joining) ? 'disabled' : ''}`}
+                onClick={() => !(isBotActive || joining) && setClassification('shared')}
+              >
+                <div className="radio-circle">
+                  <div className="radio-dot"></div>
+                </div>
+                <div className="radio-content">
+                  <div className="radio-label-row">
+                    <UsersIcon />
+                    <span className="radio-label">Shared</span>
+                  </div>
+                  <p className="radio-sublabel">All participants can access notes</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      )}
 
-      <div className="action-section">
-        {checkingStatus && !isDev && (
-          <div className="status-checking">
-            <div className="button-spinner-small"></div>
-            <span>Checking bot status...</span>
-          </div>
-        )}
-        
-        {isBotActive && !isDev && (
-          <div className="bot-active-message">
-            <span className="status-indicator status-active"></span>
-            Bot is currently active in this meeting
-          </div>
-        )}
-        
-        <button 
-          className="primary-button" 
-          onClick={handleAddBot}
-          disabled={joining || (!isDev && !meetingData) || (isDev && !manualMeetingId) || (isBotActive && !isDev)}
-        >
-          {joining ? (
-            <>
-              <div className="button-spinner"></div>
-              <span className="loading-text">{loadingMessage}</span>
-            </>
-          ) : isBotActive && !isDev ? (
-            'Bot Already Active'
-          ) : (
-            'Add Bot to Meeting'
+        {/* Action Section */}
+        <div className="action-section">
+          <button 
+            className="primary-button"
+            onClick={handleAddBot}
+            disabled={joining || !meetingData || isBotActive || !classification}
+          >
+            {joining ? (
+              <>
+                <span className="button-spinner"></span>
+                <span className="button-text">{loadingMessage}</span>
+              </>
+            ) : isBotActive ? (
+              <>
+                <CheckCircleIcon />
+                <span>Bot Already Active</span>
+              </>
+            ) : (
+              <>
+                <SparklesIcon />
+                <span>Add Bot to Meeting</span>
+              </>
+            )}
+          </button>
+
+          {success && !isBotActive && (
+            <div className="status-message status-success">
+              <CheckCircleIcon />
+              <p>Bot successfully added! It will join shortly.</p>
+            </div>
           )}
-        </button>
 
-        {success && !isBotActive && (
-          <div className="success-message">
-            Bot successfully added to meeting! It will join shortly.
-          </div>
-        )}
+          {error && (
+            <div className="status-message status-error">
+              <AlertCircleIcon />
+              <p>{error}</p>
+            </div>
+          )}
+        </div>
 
-        {error && (
-          <div className="error-message">
-            {error}
-          </div>
-        )}
+        {/* Footer */}
+        <footer className="app-footer">
+          <p className="footer-text">
+            The AI notetaker will join your meeting, capture audio, and generate transcripts automatically.
+          </p>
+        </footer>
       </div>
-
-      <footer>
-        <p className="help-text">
-          {isDev ? (
-            'Enter a Webex meeting ID above to test the bot workflow. The backend will fetch all meeting metadata.'
-          ) : (
-            'Click the button above to add the AI notetaker bot to this meeting. The bot will automatically join, capture audio, and generate transcripts.'
-          )}
-        </p>
-      </footer>
     </div>
   )
 }
 
 export default EmbeddedApp
-
